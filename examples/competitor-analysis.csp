@@ -1,0 +1,11 @@
+-- Competitor Analysis Workflow
+-- Compares Google and Microsoft in parallel, then summarizes
+
+channel search, analyze, merge, ask, save
+
+GOOGLE = search!"Google company strengths weaknesses 2024" -> analyze!"competitive position" -> SKIP
+MICROSOFT = search!"Microsoft company strengths weaknesses 2024" -> analyze!"competitive position" -> SKIP
+
+COMPARE = (GOOGLE ||| MICROSOFT) ; merge -> ask!"Based on this analysis, which company is winning and why?" -> save!"competitor-analysis.md" -> SKIP
+
+MAIN = COMPARE

@@ -1,0 +1,4 @@
+-- Simple Research Workflow
+-- Search, summarize, and save
+
+search!"golang best practices 2024" -> summarize -> save!"golang-guide.md" -> SKIP

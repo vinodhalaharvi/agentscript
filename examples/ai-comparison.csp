@@ -1,0 +1,12 @@
+-- AI API Comparison
+-- Researches three AI APIs in parallel
+
+channel search, summarize, merge, ask, save
+
+GEMINI = search!"Gemini API features pricing 2024" -> summarize -> SKIP
+GPT4 = search!"OpenAI GPT-4 API features pricing 2024" -> summarize -> SKIP
+CLAUDE = search!"Anthropic Claude API features pricing 2024" -> summarize -> SKIP
+
+COMPARE = (GEMINI ||| GPT4 ||| CLAUDE) ; merge -> ask!"Create a comparison table. Which API should a startup choose?" -> save!"ai-api-comparison.md" -> SKIP
+
+MAIN = COMPARE

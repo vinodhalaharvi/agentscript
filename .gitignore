@@ -1,0 +1,17 @@
+# Binary
+agentscript
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+
+# Output files
+*.md
+!README.md
+
+# Environment
+.env

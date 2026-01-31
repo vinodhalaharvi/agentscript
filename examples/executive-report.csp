@@ -1,0 +1,14 @@
+-- Executive Report with Email
+-- Research multiple topics, merge, summarize, and email
+
+channel search, analyze, merge, ask, save, email
+
+TRENDS = search!"tech industry trends Q4 2024" -> analyze!"key trends" -> SKIP
+GROWTH = search!"AI market growth projections 2025" -> analyze!"growth potential" -> SKIP  
+SPENDING = search!"enterprise software spending 2024" -> analyze!"budget trends" -> SKIP
+
+RESEARCH = (TRENDS ||| GROWTH ||| SPENDING) ; merge -> SKIP
+
+REPORT = RESEARCH ; ask!"Write a 500-word executive summary for a board presentation" -> save!"board-summary.md" -> email!"executives@company.com" -> SKIP
+
+MAIN = REPORT
