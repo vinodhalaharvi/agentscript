@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -312,9 +313,14 @@ func getMimeType(path string) string {
 }
 
 // GenerateVideo generates a video using Veo model
-func (c *GeminiClient) GenerateVideo(ctx context.Context, prompt string) (string, error) {
+func (c *GeminiClient) GenerateVideo(ctx context.Context, prompt string, vertical bool) (string, error) {
 	// Use Veo 3.1 for video generation with predictLongRunning endpoint
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning?key=%s", c.apiKey)
+
+	aspectRatio := "16:9"
+	if vertical {
+		aspectRatio = "9:16"
+	}
 
 	reqBody := map[string]interface{}{
 		"instances": []map[string]interface{}{
@@ -323,7 +329,7 @@ func (c *GeminiClient) GenerateVideo(ctx context.Context, prompt string) (string
 			},
 		},
 		"parameters": map[string]interface{}{
-			"aspectRatio": "16:9",
+			"aspectRatio": aspectRatio,
 		},
 	}
 
@@ -607,4 +613,130 @@ func (c *GeminiClient) DownloadFile(ctx context.Context, fileURI string, outputP
 	}
 
 	return outputPath, nil
+}
+
+// TextToSpeech converts text to speech using Gemini TTS
+func (c *GeminiClient) TextToSpeech(ctx context.Context, text string, voice string) (string, error) {
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=%s", c.apiKey)
+
+	reqBody := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]interface{}{
+					{"text": text},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"responseModalities": []string{"AUDIO"},
+			"speechConfig": map[string]interface{}{
+				"voiceConfig": map[string]interface{}{
+					"prebuiltVoiceConfig": map[string]interface{}{
+						"voiceName": voice,
+					},
+				},
+			},
+		},
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("TTS API error: status %d - %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response to get audio data
+	var ttsResp struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					InlineData struct {
+						MimeType string `json:"mimeType"`
+						Data     string `json:"data"`
+					} `json:"inlineData"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+
+	if err := json.Unmarshal(body, &ttsResp); err != nil {
+		return "", fmt.Errorf("failed to parse TTS response: %w", err)
+	}
+
+	if len(ttsResp.Candidates) == 0 || len(ttsResp.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("no audio data in response")
+	}
+
+	// Decode base64 audio data
+	audioData, err := base64.StdEncoding.DecodeString(ttsResp.Candidates[0].Content.Parts[0].InlineData.Data)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode audio data: %w", err)
+	}
+
+	// Save as WAV file (the API returns PCM data)
+	outputPath := fmt.Sprintf("tts_output_%d.wav", time.Now().UnixNano())
+
+	// Write WAV file with header
+	if err := writeWavFile(outputPath, audioData, 24000, 1, 16); err != nil {
+		return "", fmt.Errorf("failed to write WAV file: %w", err)
+	}
+
+	return outputPath, nil
+}
+
+// writeWavFile writes PCM audio data to a WAV file
+func writeWavFile(filename string, pcmData []byte, sampleRate, numChannels, bitsPerSample int) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// WAV file header
+	dataSize := len(pcmData)
+	fileSize := 36 + dataSize
+
+	// RIFF header
+	file.Write([]byte("RIFF"))
+	binary.Write(file, binary.LittleEndian, uint32(fileSize))
+	file.Write([]byte("WAVE"))
+
+	// fmt chunk
+	file.Write([]byte("fmt "))
+	binary.Write(file, binary.LittleEndian, uint32(16)) // chunk size
+	binary.Write(file, binary.LittleEndian, uint16(1))  // audio format (PCM)
+	binary.Write(file, binary.LittleEndian, uint16(numChannels))
+	binary.Write(file, binary.LittleEndian, uint32(sampleRate))
+	byteRate := sampleRate * numChannels * bitsPerSample / 8
+	binary.Write(file, binary.LittleEndian, uint32(byteRate))
+	blockAlign := numChannels * bitsPerSample / 8
+	binary.Write(file, binary.LittleEndian, uint16(blockAlign))
+	binary.Write(file, binary.LittleEndian, uint16(bitsPerSample))
+
+	// data chunk
+	file.Write([]byte("data"))
+	binary.Write(file, binary.LittleEndian, uint32(dataSize))
+	file.Write(pcmData)
+
+	return nil
 }

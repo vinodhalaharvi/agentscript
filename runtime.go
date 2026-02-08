@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,18 +19,24 @@ import (
 type Runtime struct {
 	gemini    *GeminiClient
 	google    *GoogleClient
+	github    *GitHubClient
+	claude    *ClaudeClient
 	verbose   bool
 	searchKey string
 }
 
 // RuntimeConfig holds runtime configuration
 type RuntimeConfig struct {
-	GeminiAPIKey    string
-	SearchAPIKey    string
-	Model           string
-	Verbose         bool
-	GoogleCredsFile string
-	GoogleTokenFile string
+	GeminiAPIKey       string
+	ClaudeAPIKey       string
+	SearchAPIKey       string
+	Model              string
+	Verbose            bool
+	GoogleCredsFile    string
+	GoogleTokenFile    string
+	GitHubClientID     string
+	GitHubClientSecret string
+	GitHubTokenFile    string
 }
 
 // NewRuntime creates a new Runtime instance
@@ -37,6 +44,11 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 	var geminiClient *GeminiClient
 	if cfg.GeminiAPIKey != "" {
 		geminiClient = NewGeminiClient(cfg.GeminiAPIKey, cfg.Model)
+	}
+
+	var claudeClient *ClaudeClient
+	if cfg.ClaudeAPIKey != "" {
+		claudeClient = NewClaudeClient(cfg.ClaudeAPIKey)
 	}
 
 	var googleClient *GoogleClient
@@ -53,9 +65,25 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 		}
 	}
 
+	var githubClient *GitHubClient
+	if cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "" {
+		tokenFile := cfg.GitHubTokenFile
+		if tokenFile == "" {
+			tokenFile = "github_token.json"
+		}
+		var err error
+		githubClient, err = NewGitHubClient(ctx, cfg.GitHubClientID, cfg.GitHubClientSecret, tokenFile)
+		if err != nil {
+			// Don't fail, just log warning
+			fmt.Fprintf(os.Stderr, "Warning: GitHub API not available: %v\n", err)
+		}
+	}
+
 	return &Runtime{
 		gemini:    geminiClient,
 		google:    googleClient,
+		github:    githubClient,
+		claude:    claudeClient,
 		verbose:   cfg.Verbose,
 		searchKey: cfg.SearchAPIKey,
 	}, nil
@@ -175,6 +203,8 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		result, err = r.save(cmd.Arg, input)
 	case "read":
 		result, err = r.read(cmd.Arg)
+	case "stdin":
+		result, err = r.readStdin(cmd.Arg)
 	case "list":
 		result, err = r.list(cmd.Arg)
 	case "merge":
@@ -201,6 +231,10 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		result, err = r.contactFind(ctx, cmd.Arg)
 	case "youtube_search":
 		result, err = r.youtubeSearch(ctx, cmd.Arg)
+	case "youtube_upload":
+		result, err = r.youtubeUpload(ctx, cmd.Arg, input, false)
+	case "youtube_shorts":
+		result, err = r.youtubeUpload(ctx, cmd.Arg, input, true)
 	case "image_generate":
 		result, err = r.imageGenerate(ctx, cmd.Arg, input)
 	case "image_analyze":
@@ -211,7 +245,20 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		result, err = r.videoGenerate(ctx, cmd.Arg, input)
 	case "images_to_video":
 		result, err = r.imagesToVideo(ctx, cmd.Arg, input)
+	case "text_to_speech":
+		result, err = r.textToSpeech(ctx, cmd.Arg, input)
+	case "audio_video_merge":
+		result, err = r.audioVideoMerge(ctx, cmd.Arg, input)
+	case "video_script":
+		result, err = r.videoScript(ctx, cmd.Arg, input)
+	case "confirm":
+		result, err = r.confirm(ctx, cmd.Arg, input)
+	case "github_pages":
+		result, err = r.githubPages(ctx, cmd.Arg, input)
+	case "github_pages_html":
+		result, err = r.githubPagesHTML(ctx, cmd.Arg, input)
 	default:
+		err = fmt.Errorf("unknown action: %s", cmd.Action)
 		err = fmt.Errorf("unknown action: %s", cmd.Action)
 	}
 
@@ -345,6 +392,21 @@ func (r *Runtime) read(path string) (string, error) {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 	return string(data), nil
+}
+
+// readStdin reads from standard input
+func (r *Runtime) readStdin(prompt string) (string, error) {
+	if prompt != "" {
+		fmt.Printf("%s: ", prompt)
+	} else {
+		fmt.Print("Enter text (Ctrl+D to end): ")
+	}
+
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", fmt.Errorf("failed to read stdin: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 // list lists files in a directory
@@ -850,9 +912,19 @@ func (r *Runtime) videoGenerate(ctx context.Context, prompt string, input string
 		fullPrompt = prompt + ". Additional context: " + input
 	}
 
-	fmt.Println("🎬 Generating video (this may take a few minutes)...")
+	// Check if vertical/shorts video is requested
+	isVertical := strings.Contains(strings.ToLower(prompt), "vertical") ||
+		strings.Contains(strings.ToLower(prompt), "shorts") ||
+		strings.Contains(strings.ToLower(prompt), "9:16") ||
+		strings.Contains(strings.ToLower(prompt), "portrait")
 
-	videoURI, err := r.gemini.GenerateVideo(ctx, fullPrompt)
+	if isVertical {
+		fmt.Println("🎬 Generating vertical video for Shorts (this may take a few minutes)...")
+	} else {
+		fmt.Println("🎬 Generating video (this may take a few minutes)...")
+	}
+
+	videoURI, err := r.gemini.GenerateVideo(ctx, fullPrompt, isVertical)
 	if err != nil {
 		return "", fmt.Errorf("video generation failed: %w", err)
 	}
@@ -965,6 +1037,425 @@ func (r *Runtime) imagesToVideo(ctx context.Context, imagesArg string, input str
 
 	// Return URI so it can be piped to save
 	return videoURI, nil
+}
+
+// textToSpeech converts text to speech using Gemini TTS
+func (r *Runtime) textToSpeech(ctx context.Context, voice string, input string) (string, error) {
+	r.log("TEXT_TO_SPEECH: voice=%s, input=%d bytes", voice, len(input))
+
+	if r.gemini == nil {
+		return "", fmt.Errorf("GEMINI_API_KEY required for text-to-speech")
+	}
+
+	// Default voice if not specified
+	if voice == "" {
+		voice = "Kore"
+	}
+
+	// Use the piped input as the text to speak
+	text := input
+	if text == "" {
+		return "", fmt.Errorf("no text to convert to speech - pipe text into text_to_speech")
+	}
+
+	fmt.Printf("🎙️ Converting text to speech (voice: %s)...\n", voice)
+
+	audioPath, err := r.gemini.TextToSpeech(ctx, text, voice)
+	if err != nil {
+		return "", fmt.Errorf("text-to-speech failed: %w", err)
+	}
+
+	fmt.Printf("✅ Audio generated: %s\n", audioPath)
+	return audioPath, nil
+}
+
+// audioVideoMerge combines an audio file with a video file using ffmpeg
+func (r *Runtime) audioVideoMerge(ctx context.Context, outputName string, input string) (string, error) {
+	r.log("AUDIO_VIDEO_MERGE: output=%s, input=%s", outputName, input)
+
+	// Parse input - expect "audio.wav video.mp4" or merged parallel output
+	var audioPath, videoPath string
+
+	// Try to extract paths from input
+	parts := strings.Fields(input)
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "===" || part == "Branch" {
+			continue
+		}
+		if strings.HasSuffix(part, ".wav") || strings.HasSuffix(part, ".mp3") || strings.HasSuffix(part, ".m4a") {
+			audioPath = part
+		} else if strings.HasSuffix(part, ".mp4") || strings.HasSuffix(part, ".mov") || strings.HasSuffix(part, ".webm") {
+			videoPath = part
+		}
+	}
+
+	if audioPath == "" {
+		return "", fmt.Errorf("no audio file found in input - need .wav, .mp3, or .m4a file")
+	}
+	if videoPath == "" {
+		return "", fmt.Errorf("no video file found in input - need .mp4, .mov, or .webm file")
+	}
+
+	// Check files exist
+	if _, err := os.Stat(audioPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("audio file not found: %s", audioPath)
+	}
+	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("video file not found: %s", videoPath)
+	}
+
+	// Default output name
+	if outputName == "" {
+		outputName = "merged_output.mp4"
+	}
+	if !strings.HasSuffix(outputName, ".mp4") {
+		outputName = outputName + ".mp4"
+	}
+
+	fmt.Printf("🎬 Merging audio and video with ffmpeg...\n")
+	fmt.Printf("   Audio: %s\n", audioPath)
+	fmt.Printf("   Video: %s\n", videoPath)
+
+	// Use ffmpeg to merge - replace video audio with our audio
+	// -shortest makes output length match the shorter of the two inputs
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-y",
+		"-i", videoPath,
+		"-i", audioPath,
+		"-c:v", "copy",
+		"-c:a", "aac",
+		"-map", "0:v:0",
+		"-map", "1:a:0",
+		"-shortest",
+		outputName,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Check if ffmpeg is installed
+		if strings.Contains(err.Error(), "executable file not found") {
+			fmt.Printf("\n❌ ffmpeg not found.\n")
+			fmt.Printf("\n📋 Install ffmpeg:\n")
+			fmt.Printf("   macOS:  brew install ffmpeg\n")
+			fmt.Printf("   Ubuntu: sudo apt install ffmpeg\n")
+			fmt.Printf("   Windows: choco install ffmpeg\n\n")
+			return "", fmt.Errorf("ffmpeg required for audio_video_merge - please install it")
+		}
+		return "", fmt.Errorf("ffmpeg failed: %w\nOutput: %s", err, string(output))
+	}
+
+	fmt.Printf("✅ Merged video saved: %s\n", outputName)
+	return outputName, nil
+}
+
+// videoScript converts content into a Veo-optimized video prompt with synchronized dialogue
+// This is the KEY command for creating narrated videos - Veo 3.1 will generate video WITH
+// synchronized audio/speech, so we don't need separate TTS!
+func (r *Runtime) videoScript(ctx context.Context, style string, input string) (string, error) {
+	r.log("VIDEO_SCRIPT: style=%s, input=%d bytes", style, len(input))
+
+	if r.gemini == nil && r.claude == nil {
+		return "", fmt.Errorf("GEMINI_API_KEY or CLAUDE_API_KEY required for video script generation")
+	}
+
+	if input == "" {
+		return "", fmt.Errorf("no content to convert - pipe content into video_script")
+	}
+
+	// Default style
+	if style == "" {
+		style = "news anchor"
+	}
+
+	fmt.Printf("📝 Converting to Veo video prompt (style: %s)...\n", style)
+	fmt.Printf("   Veo 3.1 will generate synchronized audio automatically!\n")
+
+	prompt := fmt.Sprintf(`Convert the following content into a video generation prompt for Veo 3.1 with SYNCHRONIZED DIALOGUE.
+
+CONTENT TO CONVERT:
+%s
+
+STYLE: %s
+
+CRITICAL REQUIREMENTS:
+1. Veo 3.1 generates video WITH synchronized audio - the speaker's lips will move in sync with dialogue
+2. Put ALL spoken words in quotes - Veo will generate speech for quoted text
+3. Keep dialogue UNDER 20 words (must fit in 8 seconds at natural speaking pace)
+4. Describe the visual scene, camera angle, lighting
+5. Add SFX: for sound effects, Ambient: for background sounds
+6. For vertical/shorts: include "portrait 9:16 aspect ratio"
+
+OUTPUT FORMAT (return ONLY this prompt, no explanation):
+[Visual scene description, camera angle, lighting]. [Speaker description] speaking directly to camera: "[DIALOGUE UNDER 20 WORDS]". SFX: [sound]. Ambient: [background].
+
+EXAMPLE:
+Modern news studio with blue accent lighting, medium close-up shot, portrait 9:16 aspect ratio. Professional female news anchor in business attire speaking directly to camera: "Breaking tonight - tech giants announce major layoffs as AI reshapes the workforce." SFX: subtle news intro tone. Ambient: quiet studio atmosphere.
+
+NOW CONVERT THE CONTENT ABOVE:`, input, style)
+
+	var result string
+	var err error
+
+	if r.claude != nil {
+		result, err = r.claude.Chat(ctx, prompt)
+	} else {
+		result, err = r.geminiCall(ctx, prompt)
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("video script generation failed: %w", err)
+	}
+
+	result = strings.TrimSpace(result)
+
+	// Validate it has quoted dialogue
+	if !strings.Contains(result, "\"") {
+		fmt.Printf("⚠️  Warning: No quoted dialogue found - Veo may not generate speech\n")
+	}
+
+	fmt.Printf("✅ Video prompt ready - Veo will sync lips to dialogue!\n")
+
+	return result, nil
+}
+
+// youtubeUpload uploads a video to YouTube (or YouTube Shorts)
+func (r *Runtime) youtubeUpload(ctx context.Context, title string, input string, isShorts bool) (string, error) {
+	r.log("YOUTUBE_UPLOAD: title=%s, input=%s, shorts=%v", title, input, isShorts)
+
+	if r.google == nil {
+		return "", fmt.Errorf("GOOGLE_CREDENTIALS_FILE required for YouTube upload")
+	}
+
+	// Input should be a video file path
+	videoPath := strings.TrimSpace(input)
+	if videoPath == "" {
+		return "", fmt.Errorf("no video file path provided - pipe a video path into youtube_upload")
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("video file not found: %s", videoPath)
+	}
+
+	// For Shorts, add #Shorts to title if not present
+	finalTitle := title
+	description := "Uploaded via AgentScript"
+	if isShorts {
+		if !strings.Contains(title, "#Shorts") && !strings.Contains(title, "#shorts") {
+			finalTitle = title + " #Shorts"
+		}
+		description = "Uploaded via AgentScript #Shorts"
+		fmt.Printf("📱 Uploading to YouTube Shorts: %s...\n", finalTitle)
+	} else {
+		fmt.Printf("📺 Uploading to YouTube: %s...\n", finalTitle)
+	}
+
+	videoURL, err := r.google.UploadToYouTube(ctx, videoPath, finalTitle, description)
+	if err != nil {
+		return "", fmt.Errorf("YouTube upload failed: %w", err)
+	}
+
+	fmt.Printf("✅ Video uploaded: %s\n", videoURL)
+	return videoURL, nil
+}
+
+// confirm prompts user for confirmation before continuing
+func (r *Runtime) confirm(ctx context.Context, message string, input string) (string, error) {
+	r.log("CONFIRM: %s", message)
+
+	// Display what we're confirming
+	if message == "" {
+		message = "Continue with this action?"
+	}
+
+	fmt.Printf("\n⚠️  CONFIRMATION REQUIRED\n")
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Printf("%s\n", message)
+	if input != "" {
+		// Show truncated input if it's a file path or short
+		if len(input) < 200 {
+			fmt.Printf("Input: %s\n", input)
+		} else {
+			fmt.Printf("Input: %s... (%d bytes)\n", input[:100], len(input))
+		}
+	}
+	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	fmt.Printf("Proceed? [y/N]: ")
+
+	var response string
+	fmt.Scanln(&response)
+
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response == "y" || response == "yes" {
+		fmt.Printf("✅ Confirmed. Continuing...\n")
+		return input, nil // Pass through the input unchanged
+	}
+
+	return "", fmt.Errorf("operation cancelled by user")
+}
+
+// githubPages deploys content as a React SPA to GitHub Pages
+func (r *Runtime) githubPages(ctx context.Context, title string, input string) (string, error) {
+	r.log("GITHUB_PAGES: title=%s, input=%d bytes", title, len(input))
+
+	if r.github == nil {
+		fmt.Printf("\n❌ GitHub API not configured.\n")
+		fmt.Printf("\n📋 Setup GitHub OAuth:\n")
+		fmt.Printf("   1. Go to: https://github.com/settings/developers\n")
+		fmt.Printf("   2. Click 'New OAuth App'\n")
+		fmt.Printf("   3. Fill in app name, homepage URL, callback URL (http://localhost)\n")
+		fmt.Printf("   4. Copy Client ID and Client Secret\n")
+		fmt.Printf("\n💡 Add to your .env file:\n")
+		fmt.Printf("   GITHUB_CLIENT_ID=your-client-id\n")
+		fmt.Printf("   GITHUB_CLIENT_SECRET=your-client-secret\n\n")
+		return "", fmt.Errorf("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET required")
+	}
+
+	if input == "" {
+		return "", fmt.Errorf("no content to deploy - pipe content into github_pages")
+	}
+
+	if title == "" {
+		title = "AgentScript Page"
+	}
+
+	// Create repo name from title
+	repoName := strings.ToLower(strings.ReplaceAll(title, " ", "-"))
+	repoName = strings.ReplaceAll(repoName, "'", "")
+	repoName = strings.ReplaceAll(repoName, "\"", "")
+
+	// Use Claude if available, otherwise fall back to Gemini
+	var reactCode string
+	var err error
+
+	if r.claude != nil {
+		fmt.Printf("🎨 Generating React SPA with Claude...\n")
+		reactCode, err = r.claude.GenerateReactSPA(ctx, title, input)
+		if err != nil {
+			return "", fmt.Errorf("Claude React generation failed: %w", err)
+		}
+	} else if r.gemini != nil {
+		fmt.Printf("🎨 Generating React SPA with Gemini...\n")
+		reactCode, err = r.generateReactSPA(ctx, title, input)
+		if err != nil {
+			return "", fmt.Errorf("Gemini React generation failed: %w", err)
+		}
+	} else {
+		fmt.Printf("\n❌ No AI API key configured for React SPA generation.\n")
+		fmt.Printf("\n📋 Get your API keys:\n")
+		fmt.Printf("   Claude (recommended): https://console.anthropic.com/settings/keys\n")
+		fmt.Printf("   Gemini:               https://aistudio.google.com/apikey\n")
+		fmt.Printf("\n💡 Then add to your .env file:\n")
+		fmt.Printf("   CLAUDE_API_KEY=sk-ant-...\n")
+		fmt.Printf("   GEMINI_API_KEY=...\n\n")
+		return "", fmt.Errorf("CLAUDE_API_KEY or GEMINI_API_KEY required for github_pages")
+	}
+
+	fmt.Printf("🚀 Deploying to GitHub Pages: %s...\n", title)
+
+	pagesURL, err := r.github.DeployReactSPA(ctx, repoName, title, reactCode)
+	if err != nil {
+		return "", fmt.Errorf("GitHub Pages deployment failed: %w", err)
+	}
+
+	fmt.Printf("✅ Deployed to: %s\n", pagesURL)
+	fmt.Printf("   (Note: May take 1-2 minutes to go live)\n")
+
+	return pagesURL, nil
+}
+
+// generateReactSPA uses Gemini to create a React single-page application
+func (r *Runtime) generateReactSPA(ctx context.Context, title string, content string) (string, error) {
+	prompt := fmt.Sprintf(`Generate a beautiful, modern React single-page application (SPA) for the following content.
+
+TITLE: %s
+
+CONTENT:
+%s
+
+REQUIREMENTS:
+1. Output ONLY the complete HTML file with embedded React (using babel standalone)
+2. Use React hooks (useState, useEffect)
+3. Modern, dark theme UI with gradients and animations
+4. Responsive design with Tailwind CSS (via CDN)
+5. Include smooth scroll animations
+6. Add a navigation header if content has sections
+7. Use React icons or emojis for visual appeal
+8. Make it visually stunning - this is for a hackathon demo!
+9. Include a footer crediting "Built with AgentScript"
+
+OUTPUT FORMAT:
+Return ONLY the HTML code starting with <!DOCTYPE html> and ending with </html>
+No markdown, no explanation, just the raw HTML/React code.`, title, content)
+
+	result, err := r.geminiCall(ctx, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	// Clean up the response - remove any markdown code blocks if present
+	result = strings.TrimSpace(result)
+	result = strings.TrimPrefix(result, "```html")
+	result = strings.TrimPrefix(result, "```")
+	result = strings.TrimSuffix(result, "```")
+	result = strings.TrimSpace(result)
+
+	// Validate it looks like HTML
+	if !strings.HasPrefix(result, "<!DOCTYPE html>") && !strings.HasPrefix(result, "<html") {
+		// Try to find HTML in the response
+		if idx := strings.Index(result, "<!DOCTYPE html>"); idx != -1 {
+			result = result[idx:]
+		} else if idx := strings.Index(result, "<html"); idx != -1 {
+			result = result[idx:]
+		} else {
+			return "", fmt.Errorf("Gemini did not return valid HTML")
+		}
+	}
+
+	return result, nil
+}
+
+// githubPagesHTML deploys content as simple HTML to GitHub Pages (no AI generation)
+func (r *Runtime) githubPagesHTML(ctx context.Context, title string, input string) (string, error) {
+	r.log("GITHUB_PAGES_HTML: title=%s, input=%d bytes", title, len(input))
+
+	if r.github == nil {
+		fmt.Printf("\n❌ GitHub API not configured.\n")
+		fmt.Printf("\n📋 Setup GitHub OAuth:\n")
+		fmt.Printf("   1. Go to: https://github.com/settings/developers\n")
+		fmt.Printf("   2. Click 'New OAuth App'\n")
+		fmt.Printf("   3. Fill in app name, homepage URL, callback URL (http://localhost)\n")
+		fmt.Printf("   4. Copy Client ID and Client Secret\n")
+		fmt.Printf("\n💡 Add to your .env file:\n")
+		fmt.Printf("   GITHUB_CLIENT_ID=your-client-id\n")
+		fmt.Printf("   GITHUB_CLIENT_SECRET=your-client-secret\n\n")
+		return "", fmt.Errorf("GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET required")
+	}
+
+	if input == "" {
+		return "", fmt.Errorf("no content to deploy - pipe content into github_pages_html")
+	}
+
+	if title == "" {
+		title = "AgentScript Page"
+	}
+
+	// Create repo name from title
+	repoName := strings.ToLower(strings.ReplaceAll(title, " ", "-"))
+	repoName = strings.ReplaceAll(repoName, "'", "")
+	repoName = strings.ReplaceAll(repoName, "\"", "")
+
+	fmt.Printf("🚀 Deploying simple HTML to GitHub Pages: %s...\n", title)
+
+	pagesURL, err := r.github.DeployToPages(ctx, repoName, title, input)
+	if err != nil {
+		return "", fmt.Errorf("GitHub Pages deployment failed: %w", err)
+	}
+
+	fmt.Printf("✅ Deployed to: %s\n", pagesURL)
+	fmt.Printf("   (Note: May take 1-2 minutes to go live)\n")
+
+	return pagesURL, nil
 }
 
 // log prints verbose output if enabled

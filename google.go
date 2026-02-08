@@ -62,8 +62,9 @@ func NewGoogleClient(ctx context.Context, credentialsFile, tokenFile string) (*G
 		tasks.TasksScope,
 		// Contacts - read
 		people.ContactsReadonlyScope,
-		// YouTube - read
+		// YouTube - read and upload
 		youtube.YoutubeReadonlyScope,
+		youtube.YoutubeUploadScope,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse credentials: %w", err)
@@ -554,4 +555,38 @@ func (g *GoogleClient) SearchYouTube(ctx context.Context, query string, maxResul
 	}
 
 	return response.Items, nil
+}
+
+// UploadToYouTube uploads a video to YouTube
+func (g *GoogleClient) UploadToYouTube(ctx context.Context, videoPath, title, description string) (string, error) {
+	// Open video file
+	file, err := os.Open(videoPath)
+	if err != nil {
+		return "", fmt.Errorf("unable to open video file: %w", err)
+	}
+	defer file.Close()
+
+	// Create video metadata
+	video := &youtube.Video{
+		Snippet: &youtube.VideoSnippet{
+			Title:       title,
+			Description: description,
+			CategoryId:  "22", // People & Blogs category
+		},
+		Status: &youtube.VideoStatus{
+			PrivacyStatus: "unlisted", // Start as unlisted for safety
+		},
+	}
+
+	// Upload the video
+	call := g.youtube.Videos.Insert([]string{"snippet", "status"}, video)
+	call = call.Media(file)
+
+	response, err := call.Do()
+	if err != nil {
+		return "", fmt.Errorf("unable to upload video: %w", err)
+	}
+
+	videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", response.Id)
+	return videoURL, nil
 }

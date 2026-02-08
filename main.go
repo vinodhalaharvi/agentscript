@@ -38,11 +38,15 @@ func main() {
 
 	// Create runtime
 	rt, err := NewRuntime(ctx, RuntimeConfig{
-		GeminiAPIKey:    geminiKey,
-		SearchAPIKey:    os.Getenv("SEARCH_API_KEY"),
-		GoogleCredsFile: googleCreds,
-		GoogleTokenFile: os.Getenv("GOOGLE_TOKEN_FILE"),
-		Verbose:         *verbose,
+		GeminiAPIKey:       geminiKey,
+		ClaudeAPIKey:       os.Getenv("CLAUDE_API_KEY"),
+		SearchAPIKey:       os.Getenv("SEARCH_API_KEY"),
+		GoogleCredsFile:    googleCreds,
+		GoogleTokenFile:    os.Getenv("GOOGLE_TOKEN_FILE"),
+		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
+		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
+		GitHubTokenFile:    os.Getenv("GITHUB_TOKEN_FILE"),
+		Verbose:            *verbose,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating runtime: %v\n", err)
