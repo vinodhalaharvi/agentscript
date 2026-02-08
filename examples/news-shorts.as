@@ -1,5 +1,5 @@
 parallel {
-    search "top US news headlines today site:twitter.com OR site:x.com"
+   search "top US news headlines today site:twitter.com OR site:x.com"
     -> ask "Extract the top 10 news headlines from these results. For each headline, give just the clean headline text without any special characters, emojis, hashtags, or URLs. Format as a numbered list."
     -> ask "Write a 45-second news anchor script summarizing these 10 headlines. Make it sound professional but engaging, like a quick news briefing. Start with 'Here are today's top US news headlines' and end with 'Stay informed, stay engaged.'"
     -> text_to_speech "Charon"
