@@ -133,7 +133,7 @@ func (c *GeminiClient) AnalyzeImage(ctx context.Context, imagePath, prompt strin
 func (c *GeminiClient) AnalyzeVideo(ctx context.Context, videoPath, prompt string) (string, error) {
 	// For videos, we need to upload to File API first, then reference
 	// For now, support small videos via inline data (< 20MB)
-	
+
 	fileInfo, err := os.Stat(videoPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to stat video: %w", err)
@@ -176,8 +176,8 @@ func (c *GeminiClient) AnalyzeVideo(ctx context.Context, videoPath, prompt strin
 
 // GenerateImage generates an image using Imagen model
 func (c *GeminiClient) GenerateImage(ctx context.Context, prompt string) ([]byte, error) {
-	// Use Imagen 3 for image generation
-	url := fmt.Sprintf("%s/imagen-3.0-generate-002:predict?key=%s", baseURL, c.apiKey)
+	// Use Imagen 4 - Imagen 3 has been shut down
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=%s", c.apiKey)
 
 	reqBody := map[string]interface{}{
 		"instances": []map[string]string{
@@ -210,23 +210,30 @@ func (c *GeminiClient) GenerateImage(ctx context.Context, prompt string) ([]byte
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// Check for error response
+	if resp.StatusCode != 200 {
+		var errResp struct {
+			Error *apiError `json:"error,omitempty"`
+		}
+		json.Unmarshal(body, &errResp)
+		if errResp.Error != nil {
+			return nil, fmt.Errorf("API error: %s (code %d)", errResp.Error.Message, errResp.Error.Code)
+		}
+		return nil, fmt.Errorf("API error: status %d - %s", resp.StatusCode, string(body))
+	}
+
 	// Parse response
 	var imgResp struct {
 		Predictions []struct {
 			BytesBase64Encoded string `json:"bytesBase64Encoded"`
 		} `json:"predictions"`
-		Error *apiError `json:"error,omitempty"`
 	}
 
 	if err := json.Unmarshal(body, &imgResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	if imgResp.Error != nil {
-		return nil, fmt.Errorf("API error: %s (code %d)", imgResp.Error.Message, imgResp.Error.Code)
-	}
-
-	if len(imgResp.Predictions) == 0 {
+	if len(imgResp.Predictions) == 0 || imgResp.Predictions[0].BytesBase64Encoded == "" {
 		return nil, fmt.Errorf("no image generated")
 	}
 
@@ -317,9 +324,9 @@ func (c *GeminiClient) GenerateVideo(ctx context.Context, prompt string) (string
 			},
 		},
 		"parameters": map[string]interface{}{
-			"sampleCount":    1,
-			"durationSec":    5,
-			"aspectRatio":    "16:9",
+			"sampleCount":      1,
+			"durationSec":      5,
+			"aspectRatio":      "16:9",
 			"personGeneration": "allow_adult",
 		},
 	}
@@ -348,7 +355,7 @@ func (c *GeminiClient) GenerateVideo(ctx context.Context, prompt string) (string
 
 	// Parse response - this returns an operation name for polling
 	var opResp struct {
-		Name string `json:"name"`
+		Name  string    `json:"name"`
 		Error *apiError `json:"error,omitempty"`
 	}
 
@@ -438,7 +445,7 @@ func (c *GeminiClient) GenerateVideoFromImages(ctx context.Context, imagePaths [
 		}
 		mimeType := getMimeType(path)
 		encoded := base64.StdEncoding.EncodeToString(imageData)
-		
+
 		imageInputs = append(imageInputs, map[string]interface{}{
 			"image": map[string]string{
 				"bytesBase64Encoded": encoded,
