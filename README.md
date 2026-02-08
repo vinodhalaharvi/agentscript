@@ -1,244 +1,238 @@
-# AgentScript 🚀
+# AgentScript DSL
 
-A DSL for orchestrating AI agents with Google integrations. Built for the **Gemini API Hackathon**.
+**A simple, powerful DSL for orchestrating AI agents with Gemini 3**
 
-## Quick Start
+AgentScript lets you build complex AI workflows in a single line of code. Think "LangGraph without the Python boilerplate."
+
+## 🚀 Quick Start
 
 ```bash
+# Set your API key
 export GEMINI_API_KEY="your-key"
 
-# Build
-go build -o agentscript .
+# Run a simple query
+make run EXPR='search "AI trends" -> summarize'
 
-# Simple search
-./agentscript -e 'search "golang best practices" -> summarize -> save "golang.md"'
-
-# Parallel comparison
-./agentscript -e 'parallel { search "React" -> analyze search "Vue" -> analyze } -> merge -> ask "which is better?"'
-
-# From file
-./agentscript -f examples/competitor-analysis.as
-
-# Natural language (translates to DSL)
-./agentscript -n "compare AWS and Azure and email me the results"
-
-# Interactive REPL
-./agentscript -i
+# Run from file
+make run-file FILE=examples/showcase.as
 ```
 
-## DSL Syntax
+## 📖 Language Overview
 
-### Basic Commands
-```bash
-search "query"              # Search via Gemini
-summarize                   # Summarize input
-ask "question"              # Ask with context
-analyze "focus"             # Analyze with focus
-save "file.md"              # Save to file
-read "file.txt"             # Read from file
-list "."                    # List directory
+### Core Syntax
+
+```
+command "argument" -> command "argument" -> command "argument"
 ```
 
-### Pipelines
-```bash
-search "topic" -> summarize -> save "output.md"
-read "notes.txt" -> ask "what are the key points?" -> save "summary.md"
-```
+Commands are chained with `->` (pipe). Each command's output becomes the next command's input.
 
 ### Parallel Execution
-```bash
+
+```
 parallel {
-    search "Google" -> analyze "strengths"
-    search "Microsoft" -> analyze "strengths"
-} -> merge -> ask "compare these companies" -> save "comparison.md"
+    branch1 -> commands
+    branch2 -> commands
+} -> merge -> next_command
 ```
 
-### Nested Parallel
-```bash
+Run multiple branches concurrently. Use `merge` to combine results.
+
+### Nested Parallel (Unique Feature!)
+
+```
 parallel {
     parallel {
-        search "AWS" -> analyze
-        search "Azure" -> analyze
-        search "GCP" -> analyze
-    } -> merge -> ask "summarize cloud providers"
+        search "topic A"
+        search "topic B"
+    } -> merge -> summarize
     
     parallel {
-        search "PostgreSQL" -> analyze
-        search "MongoDB" -> analyze
-    } -> merge -> ask "summarize databases"
-} -> merge -> ask "infrastructure recommendation" -> save "report.md"
+        search "topic C"
+        search "topic D"  
+    } -> merge -> summarize
+} -> merge -> ask "synthesize all findings"
 ```
 
-## Google Integrations
+## 🛠 All 25 Commands
 
-### Setup
+### Core Commands (8)
+| Command | Description | Example |
+|---------|-------------|---------|
+| `search` | Web search via Gemini | `search "AI news"` |
+| `summarize` | Summarize piped input | `search "topic" -> summarize` |
+| `ask` | Query Gemini with context | `ask "explain this"` |
+| `analyze` | Deep analysis | `read "data.csv" -> analyze` |
+| `save` | Save to file | `-> save "output.md"` |
+| `read` | Read file contents | `read "input.txt" -> summarize` |
+| `list` | List directory | `list "."` |
+| `merge` | Combine parallel outputs | `parallel { ... } -> merge` |
+
+### Google Workspace Commands (10)
+| Command | Description | Example |
+|---------|-------------|---------|
+| `email` | Send email via Gmail | `-> email "user@gmail.com"` |
+| `calendar` | Create calendar event | `calendar "Meeting tomorrow 2pm"` |
+| `meet` | Create Google Meet | `meet "Team sync"` |
+| `drive_save` | Upload to Google Drive | `-> drive_save "report"` |
+| `doc_create` | Create Google Doc | `-> doc_create "My Document"` |
+| `sheet_create` | Create spreadsheet | `sheet_create "Budget 2026"` |
+| `sheet_append` | Append to sheet | `-> sheet_append "sheet_id"` |
+| `task` | Create Google Task | `task "Review PR by Friday"` |
+| `contact_find` | Search contacts | `contact_find "John"` |
+| `youtube_search` | Search YouTube | `youtube_search "AI tutorials"` |
+
+### Multimodal Commands (5)
+| Command | Description | Example |
+|---------|-------------|---------|
+| `image_generate` | Generate image (Imagen 4) | `image_generate "sunset over mountains"` |
+| `image_analyze` | Analyze image | `image_analyze "photo.jpg"` |
+| `video_generate` | Generate video (Veo 3.1) | `video_generate "drone over city"` |
+| `video_analyze` | Analyze video | `video_analyze "clip.mp4"` |
+| `images_to_video` | Images to video transition | `images_to_video "a.png b.png"` |
+
+### Control Commands (1)
+| Command | Description | Example |
+|---------|-------------|---------|
+| `parallel` | Concurrent execution | `parallel { branch1 branch2 }` |
+
+## 🎬 Example Workflows
+
+### 1. Simple Research
+```bash
+make run EXPR='search "quantum computing 2026" -> summarize -> save "quantum.md"'
+```
+
+### 2. Parallel Research with Email
+```bash
+make run EXPR='parallel { search "AI safety" -> summarize search "AI ethics" -> summarize } -> merge -> ask "synthesize into report" -> email "team@company.com"'
+```
+
+### 3. Image Generation Pipeline
+```bash
+make run EXPR='image_generate "cyberpunk cityscape at night" -> save "city.png"'
+```
+
+### 4. Video Generation
+```bash
+make run EXPR='video_generate "drone flying over mountains at sunset, cinematic" -> save "drone.mp4"'
+```
+
+### 5. 🦋 Full Multimodal Pipeline (Showcase!)
+```bash
+make run EXPR='parallel { image_generate "mountain lake at sunrise, butterflies" -> save "dawn.png" image_generate "mountain lake at sunset, butterflies" -> save "sunset.png" } -> merge -> images_to_video "dawn.png sunset.png" -> save "butterflies.mp4" -> drive_save "butterflies" -> email "you@gmail.com"'
+```
+
+This single command:
+1. Generates 2 images in parallel (Imagen 4)
+2. Creates a video transitioning between them (Veo 3.1)
+3. Saves locally
+4. Uploads to Google Drive
+5. Emails you the link
+
+### 6. Competitor Analysis
+```bash
+make run-file FILE=examples/competitor-analysis.as
+```
+
+### 7. Nested Parallel Research
+```bash
+make run-file FILE=examples/nested-parallel.as
+```
+
+## 🔧 Setup
+
+### Prerequisites
+- Go 1.22+
+- Gemini API key
+
+### Installation
+```bash
+git clone https://github.com/vinodhalaharvi/agentscript
+cd agentscript
+go mod tidy
+```
+
+### Environment Variables
+```bash
+# Required
+export GEMINI_API_KEY="your-gemini-api-key"
+
+# Optional: Google Workspace integration
+export GOOGLE_CREDENTIALS_FILE="credentials.json"
+
+# Optional: Web search
+export SERPAPI_KEY="your-serpapi-key"
+```
+
+### Google OAuth Setup (for Workspace commands)
 1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Create project, enable APIs: Gmail, Calendar, Drive, Docs, Sheets, Tasks, YouTube
-3. Create OAuth credentials (Desktop app)
-4. Download as `credentials.json`
+2. Create OAuth 2.0 credentials (Desktop app)
+3. Download as `credentials.json`
+4. Run any Google command - browser will open for authorization
 
-### Commands
-```bash
-# Gmail
-search "report" -> email "boss@company.com"
-
-# Calendar
-search "agenda" -> calendar "Team Meeting Monday 10am"
-
-# Google Meet
-search "topics" -> meet "Sprint Review Friday 2pm"
-
-# Google Drive
-search "analysis" -> drive_save "Reports/analysis.md"
-
-# Google Docs
-search "research" -> doc_create "Research Report"
-
-# Google Sheets
-search "data" -> sheet_create "Data Tracking"
-search "metrics" -> sheet_append "spreadsheet_id/Sheet1"
-
-# Google Tasks
-search "todos" -> task "Review action items"
-
-# YouTube
-youtube_search "golang tutorial" -> summarize -> save "videos.md"
-
-# Contacts
-contact_find "John Smith"
-```
-
-## Multimodal (Image & Video)
-
-```bash
-# Generate an image
-image_generate "a futuristic city skyline at sunset, cyberpunk style"
-
-# Generate image from research context
-search "minimalist logo design trends" -> image_generate "modern minimalist tech startup logo"
-
-# Analyze an image
-image_analyze "photo.jpg" -> save "image-description.md"
-
-# Analyze with custom prompt
-image_analyze "product.png" -> ask "what improvements would you suggest for this UI?"
-
-# Analyze video
-video_analyze "demo.mp4" -> summarize -> save "video-notes.md"
-
-# Generate video from text prompt
-video_generate "a serene lake at sunrise with mist, cinematic drone shot"
-
-# Create video from multiple images (space or comma separated)
-images_to_video "photo1.jpg photo2.jpg photo3.jpg"
-
-# Full creative pipeline
-search "product marketing video styles" -> image_generate "sleek product on white background" -> video_generate "product rotating slowly, professional lighting"
-
-# Compare images
-parallel {
-    image_analyze "design1.jpg" -> analyze "style"
-    image_analyze "design2.jpg" -> analyze "style"
-} -> merge -> ask "which design is better and why?"
-```
-
-### Full Workflow Example
-```bash
-parallel {
-    search "Q1 sales data" -> analyze "trends"
-    search "competitor analysis" -> analyze "threats"
-    search "market forecast" -> analyze "opportunities"
-} -> merge -> ask "create executive summary" -> doc_create "Q1 Board Report" -> meet "Board Meeting Friday 9am" -> email "board@company.com"
-```
-
-## All Commands
-
-| Command | Args | Description |
-|---------|------|-------------|
-| `search` | "query" | Search via Gemini |
-| `summarize` | - | Summarize input |
-| `ask` | "question" | Ask question with context |
-| `analyze` | "focus" | Analyze with optional focus |
-| `save` | "file" | Save to local file |
-| `read` | "file" | Read from local file |
-| `list` | "path" | List directory |
-| `merge` | - | Combine parallel results |
-| `email` | "to@email" | Send via Gmail |
-| `calendar` | "event info" | Create calendar event |
-| `meet` | "meeting info" | Create Meet with link |
-| `drive_save` | "path/file" | Save to Google Drive |
-| `doc_create` | "title" | Create Google Doc |
-| `sheet_create` | "title" | Create Google Sheet |
-| `sheet_append` | "id/sheet" | Append to Sheet |
-| `task` | "todo" | Create Google Task |
-| `contact_find` | "name" | Search contacts |
-| `youtube_search` | "query" | Search YouTube |
-| `image_generate` | "prompt" | Generate image with Imagen |
-| `image_analyze` | "file.jpg" | Analyze image with Gemini |
-| `video_analyze` | "file.mp4" | Analyze video with Gemini |
-| `video_generate` | "prompt" | Generate video with Veo |
-| `images_to_video` | "img1 img2" | Create video from images |
-| `parallel { }` | commands | Run concurrently | |
-| `youtube_search` | "query" | Search YouTube |
-| `parallel { }` | commands | Run concurrently |
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Natural Language                         │
-│                "compare AWS and Azure"                       │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ Gemini translates
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      AgentScript DSL                         │
-│  parallel { search "AWS" -> analyze                          │
-│             search "Azure" -> analyze } -> merge -> ask      │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ Participle parser
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                          AST                                 │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ Runtime executes
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Parallel Execution                        │
-│  ┌─────────┐         ┌─────────┐                            │
-│  │ Branch1 │  sync   │ Branch2 │                            │
-│  │ AWS     │ ─────── │ Azure   │                            │
-│  └────┬────┘ WaitGrp └────┬────┘                            │
-│       └────────┬──────────┘                                 │
-│                ▼                                             │
-│           merge → ask                                        │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Project Structure
-
+## 📁 Project Structure
 ```
 agentscript/
-├── main.go          # CLI & REPL
-├── grammar.go       # Participle parser
-├── runtime.go       # Execution engine
-├── google.go        # Google API integrations
-├── translator.go    # Natural language → DSL
-├── client.go        # Gemini API client
-└── examples/
-    ├── simple-research.as
-    ├── competitor-analysis.as
-    ├── ai-comparison.as
-    ├── ev-market-report.as
-    ├── executive-report.as
-    ├── google-workflow.as
-    └── nested-parallel.as
+├── main.go           # CLI entry point
+├── grammar.go        # Participle grammar definition
+├── runtime.go        # Command execution engine
+├── client.go         # Gemini API client (Imagen 4, Veo 3.1)
+├── google.go         # Google Workspace integrations
+├── translator.go     # Natural language to DSL
+├── Makefile          # Build commands
+└── examples/         # Example .as files
+    ├── showcase.as           # Butterflies video pipeline
+    ├── full-demo.as          # All features demo
+    ├── simple-research.as    # Basic search
+    ├── nested-parallel.as    # 3-level nesting
+    ├── multimodal.as         # Image/video generation
+    ├── google-workflow.as    # Workspace integration
+    └── competitor-analysis.as
 ```
 
-## License
+## 🏃 Running
+
+```bash
+# Expression mode
+make run EXPR='search "topic" -> summarize'
+
+# File mode
+make run-file FILE=examples/showcase.as
+
+# REPL mode
+make repl
+
+# Natural language mode
+make natural
+> "research AI and email me a summary"
+```
+
+## 🎯 Why AgentScript?
+
+| Feature | LangGraph | AgentScript |
+|---------|-----------|-------------|
+| Lines for parallel research | 50+ | 1 |
+| Setup complexity | High | Low |
+| Nested parallelism | Complex | Native |
+| Google Workspace | Manual | Built-in |
+| Multimodal (Imagen/Veo) | Manual | Built-in |
+| Learning curve | Steep | Minutes |
+
+## 🏆 Built for Gemini 3 Hackathon
+
+AgentScript demonstrates:
+- **Gemini 3** for intelligent text processing
+- **Imagen 4** for image generation
+- **Veo 3.1** for video generation (including image-to-video)
+- **10 Google Workspace APIs** integrated
+- **Nested parallel execution** for complex workflows
+- **Single-line DSL** replacing 100s of lines of code
+
+## 📜 License
 
 MIT
 
 ---
 
-Built with 🚀 for the Gemini API Hackathon
+**Made with ❤️ for the Gemini 3 Hackathon**
