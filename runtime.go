@@ -496,66 +496,103 @@ Content to include:
 func (r *Runtime) calendar(ctx context.Context, eventInfo string, content string) (string, error) {
 	r.log("CALENDAR: %s", eventInfo)
 
-	// Use Gemini to parse event details
-	prompt := fmt.Sprintf(`Parse this event information and return ONLY a JSON object with these fields:
-- summary: event title
-- description: event description
-- start: start time in RFC3339 format (e.g., 2024-01-15T10:00:00-08:00)
-- end: end time in RFC3339 format
+	// Combine eventInfo and content for parsing
+	fullText := eventInfo
+	if content != "" {
+		fullText = content
+		if eventInfo != "" {
+			fullText = eventInfo + "\n" + content
+		}
+	}
 
-Event info: %s
+	// Use Gemini to parse event details - support MULTIPLE events
+	today := time.Now().Format("2006-01-02")
+	prompt := fmt.Sprintf(`Today is %s. Parse this text and extract ALL events/meetings/tasks with times.
 
-Additional context:
-%s`, eventInfo, content)
+Return ONLY a valid JSON array (no markdown, no explanation) where each object has:
+- summary: event title (string)
+- description: event description (string) 
+- start: start time in RFC3339 format like 2026-02-10T15:00:00-08:00
+- end: end time in RFC3339 format (if not specified, assume 1 hour after start)
 
-	var summary, description, startTime, endTime string
+If the date says "tomorrow", calculate the actual date. If it says "Monday", find the next Monday.
+If only time is given without date, assume today.
+
+Text to parse:
+%s
+
+Return ONLY the JSON array like [{"summary":"...", "description":"...", "start":"...", "end":"..."}, ...]. Even if there's only one event, return it as an array.`, today, fullText)
+
+	type EventData struct {
+		Summary     string `json:"summary"`
+		Description string `json:"description"`
+		Start       string `json:"start"`
+		End         string `json:"end"`
+	}
+
+	var events []EventData
 
 	if r.gemini != nil {
 		parsed, err := r.geminiCall(ctx, prompt)
 		if err == nil {
-			var eventData struct {
-				Summary     string `json:"summary"`
-				Description string `json:"description"`
-				Start       string `json:"start"`
-				End         string `json:"end"`
-			}
-			if json.Unmarshal([]byte(parsed), &eventData) == nil {
-				summary = eventData.Summary
-				description = eventData.Description
-				startTime = eventData.Start
-				endTime = eventData.End
+			// Clean up the response - remove markdown code blocks if present
+			parsed = strings.TrimSpace(parsed)
+			parsed = strings.TrimPrefix(parsed, "```json")
+			parsed = strings.TrimPrefix(parsed, "```")
+			parsed = strings.TrimSuffix(parsed, "```")
+			parsed = strings.TrimSpace(parsed)
+
+			if err := json.Unmarshal([]byte(parsed), &events); err != nil {
+				// Try single event fallback
+				var single EventData
+				if json.Unmarshal([]byte(parsed), &single) == nil && single.Summary != "" {
+					events = []EventData{single}
+				} else {
+					r.log("Failed to parse calendar JSON: %v\nResponse: %s", err, parsed)
+				}
 			}
 		}
 	}
 
-	if summary == "" {
-		summary = eventInfo
-		description = content
-		// Default: 1 hour from now
+	// Fallback if no events parsed
+	if len(events) == 0 {
 		now := time.Now()
-		startTime = now.Add(1 * time.Hour).Format(time.RFC3339)
-		endTime = now.Add(2 * time.Hour).Format(time.RFC3339)
+		events = []EventData{{
+			Summary:     eventInfo,
+			Description: content,
+			Start:       now.Add(1 * time.Hour).Format(time.RFC3339),
+			End:         now.Add(2 * time.Hour).Format(time.RFC3339),
+		}}
 	}
 
-	// If Google client is available, create real event
+	// Create all events
+	var results []string
+
 	if r.google != nil {
-		event, err := r.google.CreateCalendarEvent(ctx, summary, description, startTime, endTime)
-		if err != nil {
-			return "", fmt.Errorf("failed to create calendar event: %w", err)
+		fmt.Printf("Creating %d calendar event(s)...\n", len(events))
+		for i, ev := range events {
+			event, err := r.google.CreateCalendarEvent(ctx, ev.Summary, ev.Description, ev.Start, ev.End)
+			if err != nil {
+				results = append(results, fmt.Sprintf("%d. FAILED: %s - %v", i+1, ev.Summary, err))
+			} else {
+				results = append(results, fmt.Sprintf("%d. %s\n   Time: %s\n   Link: %s", i+1, event.Summary, ev.Start, event.HtmlLink))
+			}
 		}
-		return fmt.Sprintf("✅ Calendar event created: %s\nLink: %s", event.Summary, event.HtmlLink), nil
+		return fmt.Sprintf("Created %d calendar event(s):\n%s", len(events), strings.Join(results, "\n")), nil
 	}
 
 	// Fallback: simulate
-	fmt.Printf("\n📅 ========== CALENDAR EVENT ==========\n")
-	fmt.Printf("Summary: %s\n", summary)
-	fmt.Printf("Start: %s\n", startTime)
-	fmt.Printf("End: %s\n", endTime)
-	fmt.Printf("Description: %s\n", description)
-	fmt.Println("📅 ======================================")
+	fmt.Printf("\n========== CALENDAR EVENTS (%d) ==========\n", len(events))
+	for i, ev := range events {
+		fmt.Printf("%d. %s\n", i+1, ev.Summary)
+		fmt.Printf("   Start: %s\n", ev.Start)
+		fmt.Printf("   End: %s\n", ev.End)
+		fmt.Printf("   Description: %s\n", ev.Description)
+	}
+	fmt.Println("==========================================")
 	fmt.Println("(Simulated - set GOOGLE_CREDENTIALS_FILE for real calendar)")
 
-	return fmt.Sprintf("Calendar event simulated: %s", summary), nil
+	return fmt.Sprintf("Calendar events simulated: %d events", len(events)), nil
 }
 
 // meet creates a Google Meet event
