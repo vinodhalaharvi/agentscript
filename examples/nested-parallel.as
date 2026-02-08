@@ -1,4 +1,3 @@
-# Nested parallel example - two-level research
 parallel {
     parallel {
         search "React framework pros cons" -> analyze
@@ -11,4 +10,4 @@ parallel {
         search "Go backend" -> analyze
         search "Rust backend" -> analyze
     } -> merge -> ask "summarize backend options"
-} -> merge -> ask "Create a full-stack technology recommendation" -> doc_create "Tech Stack Recommendation"
+} -> merge -> ask "Create a full-stack technology recommendation"
