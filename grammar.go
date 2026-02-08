@@ -24,13 +24,13 @@ type Parallel struct {
 
 // Command represents a single command
 type Command struct {
-	Action string `@("search" | "summarize" | "save" | "read" | "stdin" | "ask" | "analyze" | "list" | "merge" | "email" | "calendar" | "meet" | "drive_save" | "doc_create" | "sheet_append" | "sheet_create" | "task" | "contact_find" | "youtube_search" | "youtube_upload" | "youtube_shorts" | "image_generate" | "image_analyze" | "video_analyze" | "video_generate" | "images_to_video" | "text_to_speech" | "audio_video_merge")`
+	Action string `@("search" | "summarize" | "save" | "read" | "stdin" | "ask" | "analyze" | "list" | "merge" | "email" | "calendar" | "meet" | "drive_save" | "doc_create" | "sheet_append" | "sheet_create" | "task" | "contact_find" | "youtube_search" | "youtube_upload" | "youtube_shorts" | "image_generate" | "image_analyze" | "video_analyze" | "video_generate" | "images_to_video" | "text_to_speech" | "audio_video_merge" | "image_audio_merge" | "maps_trip")`
 	Arg    string `@String?`
 }
 
 // Lexer definition
 var scriptLexer = lexer.MustSimple([]lexer.SimpleRule{
-	{Name: "Keyword", Pattern: `(parallel|search|summarize|save|read|stdin|ask|analyze|list|merge|email|calendar|meet|drive_save|doc_create|sheet_append|sheet_create|task|contact_find|youtube_search|youtube_upload|youtube_shorts|image_generate|image_analyze|video_analyze|video_generate|images_to_video|text_to_speech|audio_video_merge)`},
+	{Name: "Keyword", Pattern: `(parallel|search|summarize|save|read|stdin|ask|analyze|list|merge|email|calendar|meet|drive_save|doc_create|sheet_append|sheet_create|task|contact_find|youtube_search|youtube_upload|youtube_shorts|image_generate|image_analyze|video_analyze|video_generate|images_to_video|text_to_speech|audio_video_merge|image_audio_merge|maps_trip)`},
 	{Name: "String", Pattern: `"[^"]*"`},
 	{Name: "Pipe", Pattern: `->`},
 	{Name: "LBrace", Pattern: `\{`},

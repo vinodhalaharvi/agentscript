@@ -249,6 +249,10 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		result, err = r.textToSpeech(ctx, cmd.Arg, input)
 	case "audio_video_merge":
 		result, err = r.audioVideoMerge(ctx, cmd.Arg, input)
+	case "image_audio_merge":
+		result, err = r.imageAudioMerge(ctx, cmd.Arg, input)
+	case "maps_trip":
+		result, err = r.mapsTrip(ctx, cmd.Arg, input)
 	case "video_script":
 		result, err = r.videoScript(ctx, cmd.Arg, input)
 	case "confirm":
@@ -258,7 +262,6 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 	case "github_pages_html":
 		result, err = r.githubPagesHTML(ctx, cmd.Arg, input)
 	default:
-		err = fmt.Errorf("unknown action: %s", cmd.Action)
 		err = fmt.Errorf("unknown action: %s", cmd.Action)
 	}
 
@@ -1214,6 +1217,164 @@ func (r *Runtime) audioVideoMerge(ctx context.Context, outputName string, input 
 
 	fmt.Printf("✅ Merged video saved: %s\n", outputName)
 	return outputName, nil
+}
+
+// imageAudioMerge creates a video from a static image and audio using ffmpeg
+// This is a fallback when Veo quota is exhausted
+func (r *Runtime) imageAudioMerge(ctx context.Context, outputName string, input string) (string, error) {
+	r.log("IMAGE_AUDIO_MERGE: output=%s, input=%s", outputName, input)
+
+	// Parse input - expect "image.png" and "audio.wav" paths
+	var imagePath, audioPath string
+
+	parts := strings.Fields(input)
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "===" || part == "Branch" {
+			continue
+		}
+		if strings.HasSuffix(part, ".wav") || strings.HasSuffix(part, ".mp3") || strings.HasSuffix(part, ".m4a") {
+			audioPath = part
+		} else if strings.HasSuffix(part, ".png") || strings.HasSuffix(part, ".jpg") || strings.HasSuffix(part, ".jpeg") {
+			imagePath = part
+		}
+	}
+
+	if imagePath == "" {
+		return "", fmt.Errorf("no image file found in input - need .png or .jpg file")
+	}
+	if audioPath == "" {
+		return "", fmt.Errorf("no audio file found in input - need .wav, .mp3, or .m4a file")
+	}
+
+	// Check files exist
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("image file not found: %s", imagePath)
+	}
+	if _, err := os.Stat(audioPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("audio file not found: %s", audioPath)
+	}
+
+	// Default output name
+	if outputName == "" {
+		outputName = "image_video.mp4"
+	}
+	if !strings.HasSuffix(outputName, ".mp4") {
+		outputName = outputName + ".mp4"
+	}
+
+	fmt.Printf("🎬 Creating video from image + audio with ffmpeg...\n")
+	fmt.Printf("   Image: %s\n", imagePath)
+	fmt.Printf("   Audio: %s\n", audioPath)
+
+	// Use ffmpeg to create video from static image + audio
+	// -loop 1: loop the image
+	// -shortest: end when audio ends
+	// -c:v libx264: H.264 video codec
+	// -tune stillimage: optimize for still image
+	// -c:a aac: AAC audio codec
+	// -pix_fmt yuv420p: compatible pixel format
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-y",
+		"-loop", "1",
+		"-i", imagePath,
+		"-i", audioPath,
+		"-c:v", "libx264",
+		"-tune", "stillimage",
+		"-c:a", "aac",
+		"-b:a", "192k",
+		"-pix_fmt", "yuv420p",
+		"-shortest",
+		outputName,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(err.Error(), "executable file not found") {
+			fmt.Printf("\n❌ ffmpeg not found.\n")
+			fmt.Printf("\n📋 Install ffmpeg:\n")
+			fmt.Printf("   macOS:  brew install ffmpeg\n")
+			fmt.Printf("   Ubuntu: sudo apt install ffmpeg\n")
+			fmt.Printf("   Windows: choco install ffmpeg\n\n")
+			return "", fmt.Errorf("ffmpeg required for image_audio_merge - please install it")
+		}
+		return "", fmt.Errorf("ffmpeg failed: %w\nOutput: %s", err, string(output))
+	}
+
+	fmt.Printf("✅ Video created: %s\n", outputName)
+	return outputName, nil
+}
+
+// mapsTrip creates a Google Maps trip URL from a list of places
+func (r *Runtime) mapsTrip(ctx context.Context, tripName string, input string) (string, error) {
+	r.log("MAPS_TRIP: %s", tripName)
+
+	if r.gemini == nil {
+		return "", fmt.Errorf("GEMINI_API_KEY required for maps_trip")
+	}
+
+	// Use Gemini to extract places and coordinates
+	prompt := fmt.Sprintf(`From this text, extract all place names that can be visited.
+Return ONLY a JSON array of objects with "name" and "address" fields.
+The address should be specific enough for Google Maps (include city/country).
+
+Example output:
+[{"name": "Dubrovnik Old Town", "address": "Dubrovnik, Croatia"}, {"name": "Kotor", "address": "Kotor, Montenegro"}]
+
+Text:
+%s
+
+Return ONLY the JSON array, nothing else.`, input)
+
+	parsed, err := r.geminiCall(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse places: %w", err)
+	}
+
+	// Clean up response
+	parsed = strings.TrimSpace(parsed)
+	parsed = strings.TrimPrefix(parsed, "```json")
+	parsed = strings.TrimPrefix(parsed, "```")
+	parsed = strings.TrimSuffix(parsed, "```")
+	parsed = strings.TrimSpace(parsed)
+
+	var places []struct {
+		Name    string `json:"name"`
+		Address string `json:"address"`
+	}
+
+	if err := json.Unmarshal([]byte(parsed), &places); err != nil {
+		return "", fmt.Errorf("failed to parse places JSON: %w", err)
+	}
+
+	if len(places) == 0 {
+		return "", fmt.Errorf("no places found in input")
+	}
+
+	// Build Google Maps directions URL
+	// Format: https://www.google.com/maps/dir/place1/place2/place3/...
+	var encodedPlaces []string
+	for _, p := range places {
+		// URL encode the address
+		encoded := strings.ReplaceAll(p.Address, " ", "+")
+		encodedPlaces = append(encodedPlaces, encoded)
+	}
+
+	mapsURL := "https://www.google.com/maps/dir/" + strings.Join(encodedPlaces, "/")
+
+	fmt.Printf("🗺️ Created trip with %d stops:\n", len(places))
+	for i, p := range places {
+		fmt.Printf("   %d. %s\n", i+1, p.Name)
+	}
+	fmt.Printf("\n📍 Google Maps Trip URL:\n%s\n\n", mapsURL)
+
+	// Return formatted result
+	result := fmt.Sprintf("Trip: %s\n\nStops:\n", tripName)
+	for i, p := range places {
+		result += fmt.Sprintf("%d. %s - %s\n", i+1, p.Name, p.Address)
+	}
+	result += fmt.Sprintf("\nGoogle Maps Route:\n%s", mapsURL)
+
+	return result, nil
 }
 
 // videoScript converts content into a Veo-optimized video prompt with synchronized dialogue
