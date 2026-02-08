@@ -687,53 +687,67 @@ func (c *GeminiClient) TextToSpeech(ctx context.Context, text string, voice stri
 		return "", fmt.Errorf("no audio data in response")
 	}
 
-	// Decode base64 audio data
-	audioData, err := base64.StdEncoding.DecodeString(ttsResp.Candidates[0].Content.Parts[0].InlineData.Data)
+	// Decode base64 audio data - this is raw PCM (s16le, 24kHz, mono)
+	pcmData, err := base64.StdEncoding.DecodeString(ttsResp.Candidates[0].Content.Parts[0].InlineData.Data)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode audio data: %w", err)
 	}
 
-	// Save as WAV file (the API returns PCM data)
-	outputPath := fmt.Sprintf("tts_output_%d.wav", time.Now().UnixNano())
+	// Save raw PCM to temp file
+	pcmPath := fmt.Sprintf("tts_raw_%d.pcm", time.Now().UnixNano())
+	if err := os.WriteFile(pcmPath, pcmData, 0644); err != nil {
+		return "", fmt.Errorf("failed to write PCM file: %w", err)
+	}
 
-	// Write WAV file with header
-	if err := writeWavFile(outputPath, audioData, 24000, 1, 16); err != nil {
-		return "", fmt.Errorf("failed to write WAV file: %w", err)
+	// Use ffmpeg to convert raw PCM to WAV
+	outputPath := fmt.Sprintf("tts_output_%d.wav", time.Now().UnixNano())
+	cmd := exec.Command("ffmpeg", "-y",
+		"-f", "s16le", // signed 16-bit little-endian
+		"-ar", "24000", // 24kHz sample rate
+		"-ac", "1", // mono
+		"-i", pcmPath, // input raw PCM
+		outputPath, // output WAV
+	)
+
+	output, err := cmd.CombinedOutput()
+	os.Remove(pcmPath) // Clean up temp file
+
+	if err != nil {
+		return "", fmt.Errorf("ffmpeg conversion failed: %v\nOutput: %s", err, string(output))
 	}
 
 	return outputPath, nil
 }
 
-// writeWavFile writes PCM audio data to a WAV file
-func writeWavFile(filename string, pcmData []byte, sampleRate, numChannels, bitsPerSample int) error {
+// writePCMToWav writes raw PCM data to a WAV file with proper header
+func writePCMToWav(filename string, pcmData []byte, sampleRate, numChannels, bitsPerSample int) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	// WAV file header
+	// Calculate sizes
+	byteRate := sampleRate * numChannels * bitsPerSample / 8
+	blockAlign := numChannels * bitsPerSample / 8
 	dataSize := len(pcmData)
-	fileSize := 36 + dataSize
 
 	// RIFF header
 	file.Write([]byte("RIFF"))
-	binary.Write(file, binary.LittleEndian, uint32(fileSize))
+	binary.Write(file, binary.LittleEndian, uint32(36+dataSize)) // file size - 8
 	file.Write([]byte("WAVE"))
 
-	// fmt chunk
+	// fmt subchunk
 	file.Write([]byte("fmt "))
-	binary.Write(file, binary.LittleEndian, uint32(16)) // chunk size
-	binary.Write(file, binary.LittleEndian, uint16(1))  // audio format (PCM)
-	binary.Write(file, binary.LittleEndian, uint16(numChannels))
-	binary.Write(file, binary.LittleEndian, uint32(sampleRate))
-	byteRate := sampleRate * numChannels * bitsPerSample / 8
-	binary.Write(file, binary.LittleEndian, uint32(byteRate))
-	blockAlign := numChannels * bitsPerSample / 8
-	binary.Write(file, binary.LittleEndian, uint16(blockAlign))
-	binary.Write(file, binary.LittleEndian, uint16(bitsPerSample))
+	binary.Write(file, binary.LittleEndian, uint32(16))            // subchunk size
+	binary.Write(file, binary.LittleEndian, uint16(1))             // audio format (1 = PCM)
+	binary.Write(file, binary.LittleEndian, uint16(numChannels))   // num channels
+	binary.Write(file, binary.LittleEndian, uint32(sampleRate))    // sample rate
+	binary.Write(file, binary.LittleEndian, uint32(byteRate))      // byte rate
+	binary.Write(file, binary.LittleEndian, uint16(blockAlign))    // block align
+	binary.Write(file, binary.LittleEndian, uint16(bitsPerSample)) // bits per sample
 
-	// data chunk
+	// data subchunk
 	file.Write([]byte("data"))
 	binary.Write(file, binary.LittleEndian, uint32(dataSize))
 	file.Write(pcmData)

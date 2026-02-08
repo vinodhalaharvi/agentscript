@@ -368,7 +368,26 @@ func (r *Runtime) save(path, content string) (string, error) {
 		return "", fmt.Errorf("GEMINI_API_KEY required to download file")
 	}
 
-	// Regular file save
+	// Check if content is a file path that exists (e.g., from TTS output)
+	content = strings.TrimSpace(content)
+	if _, err := os.Stat(content); err == nil {
+		// Content is an existing file path - move/copy it to destination
+		if err := os.Rename(content, path); err != nil {
+			// If rename fails, try copy
+			data, err := os.ReadFile(content)
+			if err != nil {
+				return "", fmt.Errorf("failed to read source file: %w", err)
+			}
+			if err := os.WriteFile(path, data, 0644); err != nil {
+				return "", fmt.Errorf("failed to write file: %w", err)
+			}
+			os.Remove(content) // Clean up original
+		}
+		fmt.Printf("✅ Moved to %s\n", path)
+		return path, nil
+	}
+
+	// Regular file save (text content)
 	dir := filepath.Dir(path)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
