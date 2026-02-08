@@ -505,23 +505,35 @@ func (r *Runtime) calendar(ctx context.Context, eventInfo string, content string
 		}
 	}
 
+	// Get user's timezone if available
+	timezone := "America/Los_Angeles" // default
+	if r.google != nil {
+		timezone = r.google.GetTimezone()
+	}
+
 	// Use Gemini to parse event details - support MULTIPLE events
 	today := time.Now().Format("2006-01-02")
-	prompt := fmt.Sprintf(`Today is %s. Parse this text and extract ALL events/meetings/tasks with times.
+	prompt := fmt.Sprintf(`Today is %s. The user's timezone is %s.
+
+Parse this text and extract ALL events/meetings/tasks with times.
 
 Return ONLY a valid JSON array (no markdown, no explanation) where each object has:
 - summary: event title (string)
 - description: event description (string) 
-- start: start time in RFC3339 format like 2026-02-10T15:00:00-08:00
+- start: start time in RFC3339 format with timezone offset (e.g., 2026-02-10T15:00:00-08:00 for PST)
 - end: end time in RFC3339 format (if not specified, assume 1 hour after start)
 
-If the date says "tomorrow", calculate the actual date. If it says "Monday", find the next Monday.
-If only time is given without date, assume today.
+Important:
+- If the date says "tomorrow", calculate the actual date from today.
+- If it says "Monday", find the next Monday from today.
+- If only time is given without date, assume today.
+- Use the user's timezone (%s) for all times.
+- "around 2ish" means 2:00 PM, "after lunch" means 1:00 PM, "before noon" means 11:00 AM, "end of day" means 5:00 PM
 
 Text to parse:
 %s
 
-Return ONLY the JSON array like [{"summary":"...", "description":"...", "start":"...", "end":"..."}, ...]. Even if there's only one event, return it as an array.`, today, fullText)
+Return ONLY the JSON array like [{"summary":"...", "description":"...", "start":"...", "end":"..."}, ...]. Even if there's only one event, return it as an array.`, today, timezone, timezone, fullText)
 
 	type EventData struct {
 		Summary     string `json:"summary"`

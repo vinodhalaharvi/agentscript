@@ -33,6 +33,7 @@ type GoogleClient struct {
 	tasks    *tasks.Service
 	people   *people.Service
 	youtube  *youtube.Service
+	timezone string // User's timezone from calendar settings
 }
 
 // NewGoogleClient creates a new Google API client with OAuth2
@@ -120,6 +121,13 @@ func NewGoogleClient(ctx context.Context, credentialsFile, tokenFile string) (*G
 		return nil, fmt.Errorf("unable to create YouTube service: %w", err)
 	}
 
+	// Get user's timezone from calendar settings
+	tz := "America/Los_Angeles" // default
+	calSettings, err := calendarSvc.Settings.Get("timezone").Do()
+	if err == nil && calSettings.Value != "" {
+		tz = calSettings.Value
+	}
+
 	return &GoogleClient{
 		gmail:    gmailSvc,
 		calendar: calendarSvc,
@@ -129,6 +137,7 @@ func NewGoogleClient(ctx context.Context, credentialsFile, tokenFile string) (*G
 		tasks:    tasksSvc,
 		people:   peopleSvc,
 		youtube:  youtubeSvc,
+		timezone: tz,
 	}, nil
 }
 
@@ -257,6 +266,11 @@ func (g *GoogleClient) SendEmail(ctx context.Context, to, subject, body string) 
 // ============================================================================
 // Calendar
 // ============================================================================
+
+// GetTimezone returns the user's timezone from calendar settings
+func (g *GoogleClient) GetTimezone() string {
+	return g.timezone
+}
 
 // CreateCalendarEvent creates an event in Google Calendar
 func (g *GoogleClient) CreateCalendarEvent(ctx context.Context, summary, description, startTime, endTime string) (*calendar.Event, error) {
