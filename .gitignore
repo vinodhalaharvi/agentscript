@@ -1,17 +1,20 @@
-# Binary
-agentscript
-
 # IDE
 .idea/
-.vscode/
 *.iml
+.vscode/
 
-# OS
+# Binaries
+agentscript
+*.exe
+
+# OS files
 .DS_Store
-
-# Output files
-*.md
-!README.md
+Thumbs.db
 
 # Environment
 .env
+*.env.local
+
+# Build
+/bin/
+/dist/

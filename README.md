@@ -1,26 +1,6 @@
-# AgentScript - CSP-M for AI Agents 🔬
+# AgentScript 🚀
 
-A formal process algebra (CSP-M) interpreter for orchestrating AI agents. Built for the **Gemini 3 Hackathon**.
-
-## The Big Idea
-
-Instead of ad-hoc workflow languages, AgentScript uses **real CSP-M** (Communicating Sequential Processes - Machine readable) - a mathematically rigorous process algebra used in formal verification.
-
-```csp
--- Parallel AI research with formal semantics
-(search!"Google" -> analyze -> SKIP ||| search!"Microsoft" -> analyze -> SKIP) 
-  ; merge -> ask!"compare these companies" -> SKIP
-```
-
-## Why CSP-M?
-
-| Feature | Benefit |
-|---------|---------|
-| **Formal semantics** | Mathematically defined behavior |
-| **Parallel composition** | `P \|\|\| Q` runs concurrently |
-| **Sequential composition** | `P ; Q` runs in order |
-| **Academic credibility** | Real process algebra, not made-up DSL |
-| **Tool compatibility** | Can verify with FDR4 model checker |
+A DSL for orchestrating AI agents with Google integrations. Built for the **Gemini API Hackathon**.
 
 ## Quick Start
 
@@ -30,153 +10,230 @@ export GEMINI_API_KEY="your-key"
 # Build
 go build -o agentscript .
 
-# Simple expression
-./agentscript -e 'search!"golang" -> summarize -> save!"out.md" -> SKIP'
+# Simple search
+./agentscript -e 'search "golang best practices" -> summarize -> save "golang.md"'
 
-# Parallel execution
-./agentscript -e '(search!"A" -> SKIP ||| search!"B" -> SKIP) ; merge -> SKIP'
+# Parallel comparison
+./agentscript -e 'parallel { search "React" -> analyze search "Vue" -> analyze } -> merge -> ask "which is better?"'
 
 # From file
-./agentscript -f examples/competitor-analysis.csp
+./agentscript -f examples/competitor-analysis.as
 
-# Natural language (translates to CSP-M)
-./agentscript -n "compare Google and Microsoft"
+# Natural language (translates to DSL)
+./agentscript -n "compare AWS and Azure and email me the results"
 
 # Interactive REPL
 ./agentscript -i
 ```
 
-## CSP-M Syntax
+## DSL Syntax
 
-### Processes
-```csp
-SKIP                -- terminate successfully
-STOP                -- deadlock (avoid!)
-event -> P          -- do event, then P
-P ; Q               -- sequential: P then Q
-P ||| Q             -- parallel: P and Q concurrently
-P [] Q              -- choice: either P or Q
-(P)                 -- grouping
+### Basic Commands
+```bash
+search "query"              # Search via Gemini
+summarize                   # Summarize input
+ask "question"              # Ask with context
+analyze "focus"             # Analyze with focus
+save "file.md"              # Save to file
+read "file.txt"             # Read from file
+list "."                    # List directory
 ```
 
-### Events (Built-in Actions)
-```csp
-search!"query"      -- search for information
-summarize           -- summarize input
-analyze!"focus"     -- analyze with optional focus
-ask!"question"      -- ask a question
-save!"filename"     -- save to file
-read!"filename"     -- read from file
-list!"path"         -- list directory
-merge               -- combine parallel results
-email!"address"     -- send email
+### Pipelines
+```bash
+search "topic" -> summarize -> save "output.md"
+read "notes.txt" -> ask "what are the key points?" -> save "summary.md"
 ```
 
-### Process Definitions
-```csp
--- Define reusable processes
-channel search, analyze, merge, ask, save
-
-BRANCH1 = search!"topic A" -> analyze -> SKIP
-BRANCH2 = search!"topic B" -> analyze -> SKIP
-
-COMPARE = (BRANCH1 ||| BRANCH2) ; merge -> ask!"compare" -> SKIP
-
-MAIN = COMPARE
+### Parallel Execution
+```bash
+parallel {
+    search "Google" -> analyze "strengths"
+    search "Microsoft" -> analyze "strengths"
+} -> merge -> ask "compare these companies" -> save "comparison.md"
 ```
 
-## Examples
-
-### Simple Research
-```csp
-search!"golang best practices" -> summarize -> save!"guide.md" -> SKIP
+### Nested Parallel
+```bash
+parallel {
+    parallel {
+        search "AWS" -> analyze
+        search "Azure" -> analyze
+        search "GCP" -> analyze
+    } -> merge -> ask "summarize cloud providers"
+    
+    parallel {
+        search "PostgreSQL" -> analyze
+        search "MongoDB" -> analyze
+    } -> merge -> ask "summarize databases"
+} -> merge -> ask "infrastructure recommendation" -> save "report.md"
 ```
 
-### Parallel Comparison
-```csp
-(search!"Tesla" -> analyze -> SKIP 
- ||| search!"Ford" -> analyze -> SKIP 
- ||| search!"GM" -> analyze -> SKIP) 
-; merge -> ask!"who is winning the EV race?" -> SKIP
+## Google Integrations
+
+### Setup
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Create project, enable APIs: Gmail, Calendar, Drive, Docs, Sheets, Tasks, YouTube
+3. Create OAuth credentials (Desktop app)
+4. Download as `credentials.json`
+
+### Commands
+```bash
+# Gmail
+search "report" -> email "boss@company.com"
+
+# Calendar
+search "agenda" -> calendar "Team Meeting Monday 10am"
+
+# Google Meet
+search "topics" -> meet "Sprint Review Friday 2pm"
+
+# Google Drive
+search "analysis" -> drive_save "Reports/analysis.md"
+
+# Google Docs
+search "research" -> doc_create "Research Report"
+
+# Google Sheets
+search "data" -> sheet_create "Data Tracking"
+search "metrics" -> sheet_append "spreadsheet_id/Sheet1"
+
+# Google Tasks
+search "todos" -> task "Review action items"
+
+# YouTube
+youtube_search "golang tutorial" -> summarize -> save "videos.md"
+
+# Contacts
+contact_find "John Smith"
 ```
 
-### Full Workflow File
-```csp
--- competitor-analysis.csp
-channel search, analyze, merge, ask, save
+## Multimodal (Image & Video)
 
-GOOGLE = search!"Google strengths" -> analyze -> SKIP
-MICROSOFT = search!"Microsoft strengths" -> analyze -> SKIP
+```bash
+# Generate an image
+image_generate "a futuristic city skyline at sunset, cyberpunk style"
 
-MAIN = (GOOGLE ||| MICROSOFT) ; merge -> ask!"compare" -> save!"analysis.md" -> SKIP
+# Generate image from research context
+search "minimalist logo design trends" -> image_generate "modern minimalist tech startup logo"
+
+# Analyze an image
+image_analyze "photo.jpg" -> save "image-description.md"
+
+# Analyze with custom prompt
+image_analyze "product.png" -> ask "what improvements would you suggest for this UI?"
+
+# Analyze video
+video_analyze "demo.mp4" -> summarize -> save "video-notes.md"
+
+# Generate video from text prompt
+video_generate "a serene lake at sunrise with mist, cinematic drone shot"
+
+# Create video from multiple images (space or comma separated)
+images_to_video "photo1.jpg photo2.jpg photo3.jpg"
+
+# Full creative pipeline
+search "product marketing video styles" -> image_generate "sleek product on white background" -> video_generate "product rotating slowly, professional lighting"
+
+# Compare images
+parallel {
+    image_analyze "design1.jpg" -> analyze "style"
+    image_analyze "design2.jpg" -> analyze "style"
+} -> merge -> ask "which design is better and why?"
 ```
+
+### Full Workflow Example
+```bash
+parallel {
+    search "Q1 sales data" -> analyze "trends"
+    search "competitor analysis" -> analyze "threats"
+    search "market forecast" -> analyze "opportunities"
+} -> merge -> ask "create executive summary" -> doc_create "Q1 Board Report" -> meet "Board Meeting Friday 9am" -> email "board@company.com"
+```
+
+## All Commands
+
+| Command | Args | Description |
+|---------|------|-------------|
+| `search` | "query" | Search via Gemini |
+| `summarize` | - | Summarize input |
+| `ask` | "question" | Ask question with context |
+| `analyze` | "focus" | Analyze with optional focus |
+| `save` | "file" | Save to local file |
+| `read` | "file" | Read from local file |
+| `list` | "path" | List directory |
+| `merge` | - | Combine parallel results |
+| `email` | "to@email" | Send via Gmail |
+| `calendar` | "event info" | Create calendar event |
+| `meet` | "meeting info" | Create Meet with link |
+| `drive_save` | "path/file" | Save to Google Drive |
+| `doc_create` | "title" | Create Google Doc |
+| `sheet_create` | "title" | Create Google Sheet |
+| `sheet_append` | "id/sheet" | Append to Sheet |
+| `task` | "todo" | Create Google Task |
+| `contact_find` | "name" | Search contacts |
+| `youtube_search` | "query" | Search YouTube |
+| `image_generate` | "prompt" | Generate image with Imagen |
+| `image_analyze` | "file.jpg" | Analyze image with Gemini |
+| `video_analyze` | "file.mp4" | Analyze video with Gemini |
+| `video_generate` | "prompt" | Generate video with Veo |
+| `images_to_video` | "img1 img2" | Create video from images |
+| `parallel { }` | commands | Run concurrently | |
+| `youtube_search` | "query" | Search YouTube |
+| `parallel { }` | commands | Run concurrently |
 
 ## Architecture
 
 ```
-                    ┌─────────────────────┐
-                    │   Natural Language  │
-                    │  "compare A and B"  │
-                    └──────────┬──────────┘
-                               │ Gemini translates
-                               ▼
-┌─────────────────────────────────────────────────────────┐
-│                      CSP-M                              │
-│  (search!"A" -> SKIP ||| search!"B" -> SKIP) ; merge   │
-└──────────┬──────────────────────────────────────────────┘
-           │ Participle parser
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│                       AST                               │
-│  ProcessExpr → ParallelExpr → PrefixExpr → Event       │
-└──────────┬──────────────────────────────────────────────┘
-           │ Runtime interprets
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│                    Execution                            │
-│  ┌─────────┐  goroutines  ┌─────────┐                  │
-│  │ Branch1 │ ──────────── │ Branch2 │                  │
-│  └────┬────┘   sync.WG    └────┬────┘                  │
-│       └──────────┬─────────────┘                       │
-│                  ▼                                      │
-│              merge → ask → output                       │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     Natural Language                         │
+│                "compare AWS and Azure"                       │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ Gemini translates
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      AgentScript DSL                         │
+│  parallel { search "AWS" -> analyze                          │
+│             search "Azure" -> analyze } -> merge -> ask      │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ Participle parser
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                          AST                                 │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ Runtime executes
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Parallel Execution                        │
+│  ┌─────────┐         ┌─────────┐                            │
+│  │ Branch1 │  sync   │ Branch2 │                            │
+│  │ AWS     │ ─────── │ Azure   │                            │
+│  └────┬────┘ WaitGrp └────┬────┘                            │
+│       └────────┬──────────┘                                 │
+│                ▼                                             │
+│           merge → ask                                        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
 
 ```
 agentscript/
-├── main.go          # CLI entry point & REPL
-├── grammar.go       # CSP-M parser (Participle)
-├── runtime.go       # AST interpreter with parallel execution
-├── translator.go    # Natural language → CSP-M
+├── main.go          # CLI & REPL
+├── grammar.go       # Participle parser
+├── runtime.go       # Execution engine
+├── google.go        # Google API integrations
+├── translator.go    # Natural language → DSL
 ├── client.go        # Gemini API client
-├── examples/
-│   ├── competitor-analysis.csp
-│   ├── ai-comparison.csp
-│   ├── simple-research.csp
-│   └── executive-report.csp
-└── README.md
+└── examples/
+    ├── simple-research.as
+    ├── competitor-analysis.as
+    ├── ai-comparison.as
+    ├── ev-market-report.as
+    ├── executive-report.as
+    ├── google-workflow.as
+    └── nested-parallel.as
 ```
-
-## Formal Verification (Future)
-
-CSP-M specifications can be verified with FDR4 model checker:
-- Deadlock freedom
-- Livelock freedom
-- Refinement checking
-
-```csp
--- This could be checked for deadlocks in FDR4
-assert MAIN :[deadlock free]
-```
-
-## Built With
-
-- [Participle](https://github.com/alecthomas/participle) - Parser generator for Go
-- [Gemini API](https://ai.google.dev/) - Google's AI model
-- [CSP](https://en.wikipedia.org/wiki/Communicating_sequential_processes) - Hoare's process algebra
 
 ## License
 
@@ -184,4 +241,4 @@ MIT
 
 ---
 
-Built with 🔬 for the Gemini 3 Hackathon
+Built with 🚀 for the Gemini API Hackathon
