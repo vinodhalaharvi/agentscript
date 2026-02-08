@@ -467,31 +467,47 @@ func (c *GeminiClient) pollVideoOperation(ctx context.Context, operationName str
 
 // GenerateVideoFromImages generates a video from multiple images
 func (c *GeminiClient) GenerateVideoFromImages(ctx context.Context, imagePaths []string, prompt string) (string, error) {
-	// Use Veo 3.1 with first frame image
+	// Use Veo 3.1 with first frame (and optionally last frame)
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning?key=%s", c.apiKey)
 
-	// Use first image as starting frame
 	if len(imagePaths) == 0 {
 		return "", fmt.Errorf("no images provided")
 	}
 
-	imageData, err := os.ReadFile(imagePaths[0])
+	// Read and encode first image
+	firstImageData, err := os.ReadFile(imagePaths[0])
 	if err != nil {
-		return "", fmt.Errorf("failed to read image %s: %w", imagePaths[0], err)
+		return "", fmt.Errorf("failed to read first image %s: %w", imagePaths[0], err)
 	}
-	mimeType := getMimeType(imagePaths[0])
-	encoded := base64.StdEncoding.EncodeToString(imageData)
+	firstMimeType := getMimeType(imagePaths[0])
+	firstEncoded := base64.StdEncoding.EncodeToString(firstImageData)
+
+	// Build instance with first image
+	instance := map[string]interface{}{
+		"prompt": prompt,
+		"image": map[string]interface{}{
+			"bytesBase64Encoded": firstEncoded,
+			"mimeType":           firstMimeType,
+		},
+	}
+
+	// If we have a second image, use it as the last frame
+	if len(imagePaths) >= 2 {
+		lastImageData, err := os.ReadFile(imagePaths[1])
+		if err != nil {
+			return "", fmt.Errorf("failed to read last image %s: %w", imagePaths[1], err)
+		}
+		lastMimeType := getMimeType(imagePaths[1])
+		lastEncoded := base64.StdEncoding.EncodeToString(lastImageData)
+
+		instance["lastFrame"] = map[string]interface{}{
+			"bytesBase64Encoded": lastEncoded,
+			"mimeType":           lastMimeType,
+		}
+	}
 
 	reqBody := map[string]interface{}{
-		"instances": []map[string]interface{}{
-			{
-				"prompt": prompt,
-				"image": map[string]interface{}{
-					"bytesBase64Encoded": encoded,
-					"mimeType":           mimeType,
-				},
-			},
-		},
+		"instances": []map[string]interface{}{instance},
 		"parameters": map[string]interface{}{
 			"aspectRatio": "16:9",
 		},

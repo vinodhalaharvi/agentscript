@@ -287,15 +287,36 @@ func (r *Runtime) search(ctx context.Context, query string) (string, error) {
 
 // save writes content to a file
 func (r *Runtime) save(path, content string) (string, error) {
+	// Check if content is a temp image file from imageGenerate
+	if strings.HasPrefix(content, "IMAGEFILE:") {
+		tempPath := strings.TrimPrefix(content, "IMAGEFILE:")
+		// Move temp file to final destination
+		if err := os.Rename(tempPath, path); err != nil {
+			// If rename fails (cross-device), try copy
+			data, err := os.ReadFile(tempPath)
+			if err != nil {
+				return "", fmt.Errorf("failed to read temp image: %w", err)
+			}
+			if err := os.WriteFile(path, data, 0644); err != nil {
+				return "", fmt.Errorf("failed to write image: %w", err)
+			}
+			os.Remove(tempPath)
+		}
+		fmt.Printf("✅ Image saved to %s\n", path)
+		return path, nil
+	}
+
 	// Check if content is a Gemini file URI that needs downloading
 	if strings.HasPrefix(content, "https://generativelanguage.googleapis.com/") && strings.Contains(content, "/files/") {
 		if r.gemini != nil {
 			fmt.Printf("📥 Downloading to %s...\n", path)
-			savedPath, err := r.gemini.DownloadFile(context.Background(), content, path)
+			_, err := r.gemini.DownloadFile(context.Background(), content, path)
 			if err != nil {
 				return "", fmt.Errorf("failed to download file: %w", err)
 			}
-			return fmt.Sprintf("✅ Downloaded and saved to %s", savedPath), nil
+			fmt.Printf("✅ Saved to %s\n", path)
+			// Return just the path for chaining
+			return path, nil
 		}
 		return "", fmt.Errorf("GEMINI_API_KEY required to download file")
 	}
@@ -312,7 +333,9 @@ func (r *Runtime) save(path, content string) (string, error) {
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 
-	return fmt.Sprintf("Saved %d bytes to %s", len(content), path), nil
+	fmt.Printf("✅ Saved %d bytes to %s\n", len(content), path)
+	// Return just the path for chaining
+	return path, nil
 }
 
 // read reads content from a file
@@ -756,13 +779,17 @@ func (r *Runtime) imageGenerate(ctx context.Context, prompt string, input string
 		return "", fmt.Errorf("image generation failed: %w", err)
 	}
 
-	// Save to file
-	filename := "generated_image.png"
-	if err := os.WriteFile(filename, imageBytes, 0644); err != nil {
-		return "", fmt.Errorf("failed to save image: %w", err)
+	// Store the image bytes in a temp file and return a special marker
+	// that save() can detect and handle properly
+	tempFile := fmt.Sprintf(".temp_image_%d.png", time.Now().UnixNano())
+	if err := os.WriteFile(tempFile, imageBytes, 0644); err != nil {
+		return "", fmt.Errorf("failed to save temp image: %w", err)
 	}
 
-	return fmt.Sprintf("✅ Image generated and saved to: %s (%d bytes)", filename, len(imageBytes)), nil
+	fmt.Printf("✅ Image generated (%d bytes)\n", len(imageBytes))
+
+	// Return the temp file path - save command will move it to the final location
+	return "IMAGEFILE:" + tempFile, nil
 }
 
 // imageAnalyze analyzes an image file
@@ -837,72 +864,107 @@ func (r *Runtime) videoGenerate(ctx context.Context, prompt string, input string
 }
 
 // imagesToVideo generates a video from multiple images
-func (r *Runtime) imagesToVideo(ctx context.Context, imagesArg string, prompt string) (string, error) {
-	r.log("IMAGES_TO_VIDEO: %s", imagesArg)
+func (r *Runtime) imagesToVideo(ctx context.Context, imagesArg string, input string) (string, error) {
+	r.log("IMAGES_TO_VIDEO: arg=%s, input=%s", imagesArg, input)
 
 	if r.gemini == nil {
 		return "", fmt.Errorf("GEMINI_API_KEY required for video generation")
 	}
 
-	// Parse image paths - support comma, space, or newline separated
+	// Parse image paths from both the argument and piped input
 	var imagePaths []string
 
-	if imagesArg != "" {
+	// Helper to extract image paths from text
+	extractPaths := func(text string) []string {
+		var paths []string
 		// Replace newlines and commas with spaces, then split
-		normalized := strings.ReplaceAll(imagesArg, "\n", " ")
+		normalized := strings.ReplaceAll(text, "\n", " ")
 		normalized = strings.ReplaceAll(normalized, ",", " ")
+		normalized = strings.ReplaceAll(normalized, "===", " ")
+		normalized = strings.ReplaceAll(normalized, "Branch", " ")
 		for _, p := range strings.Fields(normalized) {
 			path := strings.TrimSpace(p)
-			if path != "" && (strings.HasSuffix(strings.ToLower(path), ".jpg") ||
-				strings.HasSuffix(strings.ToLower(path), ".jpeg") ||
-				strings.HasSuffix(strings.ToLower(path), ".png") ||
-				strings.HasSuffix(strings.ToLower(path), ".webp") ||
-				strings.HasSuffix(strings.ToLower(path), ".gif")) {
-				imagePaths = append(imagePaths, path)
-			} else if path != "" && !strings.Contains(path, " ") {
-				// Might be a path without extension check
-				imagePaths = append(imagePaths, path)
+			// Check for image extensions
+			lower := strings.ToLower(path)
+			if strings.HasSuffix(lower, ".jpg") ||
+				strings.HasSuffix(lower, ".jpeg") ||
+				strings.HasSuffix(lower, ".png") ||
+				strings.HasSuffix(lower, ".webp") ||
+				strings.HasSuffix(lower, ".gif") {
+				paths = append(paths, path)
 			}
 		}
+		return paths
 	}
 
-	// Also check if prompt/input contains file paths (from previous command output)
-	if len(imagePaths) == 0 && prompt != "" {
-		normalized := strings.ReplaceAll(prompt, "\n", " ")
-		normalized = strings.ReplaceAll(normalized, ",", " ")
-		for _, p := range strings.Fields(normalized) {
-			path := strings.TrimSpace(p)
-			if strings.HasSuffix(strings.ToLower(path), ".jpg") ||
-				strings.HasSuffix(strings.ToLower(path), ".jpeg") ||
-				strings.HasSuffix(strings.ToLower(path), ".png") ||
-				strings.HasSuffix(strings.ToLower(path), ".webp") {
-				imagePaths = append(imagePaths, path)
-			}
+	// First try to get paths from the argument
+	if imagesArg != "" {
+		imagePaths = append(imagePaths, extractPaths(imagesArg)...)
+	}
+
+	// Also extract from piped input (merged parallel output)
+	if input != "" {
+		imagePaths = append(imagePaths, extractPaths(input)...)
+	}
+
+	// Deduplicate paths while preserving order
+	seen := make(map[string]bool)
+	var uniquePaths []string
+	for _, p := range imagePaths {
+		if !seen[p] {
+			seen[p] = true
+			uniquePaths = append(uniquePaths, p)
 		}
 	}
+	imagePaths = uniquePaths
 
 	if len(imagePaths) == 0 {
-		return "", fmt.Errorf("no image paths provided. Use: images_to_video \"img1.jpg img2.jpg img3.jpg\"")
+		return "", fmt.Errorf("no image paths found. Use: images_to_video \"img1.png img2.png\" or pipe from parallel image generation")
 	}
 
-	// Use a default video prompt
+	// Use a default video prompt, or use piped input if it looks like a description
 	videoPrompt := "Create a smooth cinematic video transitioning between these images"
-	if prompt != "" && len(strings.Fields(prompt)) < 20 {
-		// If prompt is short, use it as the video description
-		videoPrompt = prompt
+	if input != "" {
+		// Check if input contains a description (not just file paths)
+		words := strings.Fields(input)
+		descWords := 0
+		for _, word := range words {
+			lower := strings.ToLower(word)
+			if !strings.HasSuffix(lower, ".png") &&
+				!strings.HasSuffix(lower, ".jpg") &&
+				!strings.Contains(lower, "===") &&
+				!strings.Contains(lower, "branch") &&
+				len(word) > 2 {
+				descWords++
+			}
+		}
+		// If there's substantial text beyond file paths, might be a description
+		if descWords > 5 {
+			// Extract potential description
+			for _, keyword := range []string{"smooth", "transition", "cinematic", "pan", "zoom", "animate"} {
+				if strings.Contains(strings.ToLower(input), keyword) {
+					videoPrompt = input
+					break
+				}
+			}
+		}
 	}
 
 	fmt.Printf("🎬 Generating video from %d images (this may take a few minutes)...\n", len(imagePaths))
 	for i, p := range imagePaths {
 		fmt.Printf("   %d. %s\n", i+1, p)
 	}
+	fmt.Printf("   Prompt: %s\n", videoPrompt)
 
 	videoURI, err := r.gemini.GenerateVideoFromImages(ctx, imagePaths, videoPrompt)
 	if err != nil {
 		return "", fmt.Errorf("video generation failed: %w", err)
 	}
 
-	return fmt.Sprintf("✅ Video generated from %d images!\nURI: %s", len(imagePaths), videoURI), nil
+	fmt.Printf("✅ Video generated from %d images!\n", len(imagePaths))
+
+	// Return URI so it can be piped to save
+	return videoURI, nil
 }
 
 // log prints verbose output if enabled
