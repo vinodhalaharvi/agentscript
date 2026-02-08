@@ -45,14 +45,24 @@ func NewGoogleClient(ctx context.Context, credentialsFile, tokenFile string) (*G
 
 	// Configure OAuth2 with all required scopes
 	config, err := google.ConfigFromJSON(b,
+		// Gmail - send and read profile
 		gmail.GmailSendScope,
-		gmail.GmailReadonlyScope, // Needed for GetProfile
+		gmail.GmailReadonlyScope,
+		// Calendar - full access for Meet links
 		calendar.CalendarEventsScope,
+		calendar.CalendarScope,
+		// Drive - file creation
 		drive.DriveFileScope,
+		drive.DriveScope,
+		// Docs - full access
 		docs.DocumentsScope,
+		// Sheets - full access
 		sheets.SpreadsheetsScope,
+		// Tasks - full access
 		tasks.TasksScope,
+		// Contacts - read
 		people.ContactsReadonlyScope,
+		// YouTube - read
 		youtube.YoutubeReadonlyScope,
 	)
 	if err != nil {
