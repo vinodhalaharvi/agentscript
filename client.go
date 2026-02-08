@@ -645,25 +645,49 @@ func (c *GeminiClient) TextToSpeech(ctx context.Context, text string, voice stri
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
+	// Retry up to 3 times for transient errors
+	var body []byte
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+		if err != nil {
+			return "", fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("request failed: %w", err)
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			continue
+		}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		body, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read response: %w", err)
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			continue
+		}
+
+		if resp.StatusCode == 500 || resp.StatusCode == 503 {
+			lastErr = fmt.Errorf("TTS API error: status %d (attempt %d/3)", resp.StatusCode, attempt)
+			fmt.Printf("⚠️ TTS API returned %d, retrying in %d seconds...\n", resp.StatusCode, attempt*2)
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+			continue
+		}
+
+		if resp.StatusCode != 200 {
+			return "", fmt.Errorf("TTS API error: status %d - %s", resp.StatusCode, string(body))
+		}
+
+		// Success
+		lastErr = nil
+		break
 	}
 
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("TTS API error: status %d - %s", resp.StatusCode, string(body))
+	if lastErr != nil {
+		return "", lastErr
 	}
 
 	// Parse response to get audio data

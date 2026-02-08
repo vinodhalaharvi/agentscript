@@ -10,3 +10,4 @@ parallel {
 }
 -> merge
 -> audio_video_merge "butterfly_shorts.mp4"
+-> youtube_shorts "Amazing Butterflies - AI Generated"
