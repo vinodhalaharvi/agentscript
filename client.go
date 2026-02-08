@@ -313,9 +313,8 @@ func getMimeType(path string) string {
 
 // GenerateVideo generates a video using Veo model
 func (c *GeminiClient) GenerateVideo(ctx context.Context, prompt string) (string, error) {
-	// Use Veo 2 for video generation
-	// Note: Video generation is async - we need to poll for results
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=%s", c.apiKey)
+	// Use Veo 3.1 for video generation with predictLongRunning endpoint
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning?key=%s", c.apiKey)
 
 	reqBody := map[string]interface{}{
 		"instances": []map[string]interface{}{
@@ -324,146 +323,6 @@ func (c *GeminiClient) GenerateVideo(ctx context.Context, prompt string) (string
 			},
 		},
 		"parameters": map[string]interface{}{
-			"sampleCount":      1,
-			"durationSec":      5,
-			"aspectRatio":      "16:9",
-			"personGeneration": "allow_adult",
-		},
-	}
-
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Parse response - this returns an operation name for polling
-	var opResp struct {
-		Name  string    `json:"name"`
-		Error *apiError `json:"error,omitempty"`
-	}
-
-	if err := json.Unmarshal(body, &opResp); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if opResp.Error != nil {
-		return "", fmt.Errorf("API error: %s (code %d)", opResp.Error.Message, opResp.Error.Code)
-	}
-
-	if opResp.Name == "" {
-		return "", fmt.Errorf("no operation name returned")
-	}
-
-	// Poll for completion
-	return c.pollVideoOperation(ctx, opResp.Name)
-}
-
-// pollVideoOperation polls for video generation completion
-func (c *GeminiClient) pollVideoOperation(ctx context.Context, operationName string) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/%s?key=%s", operationName, c.apiKey)
-
-	for i := 0; i < 60; i++ { // Poll for up to 5 minutes
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
-
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			return "", fmt.Errorf("failed to create request: %w", err)
-		}
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			continue // Retry on network error
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			continue
-		}
-
-		var opStatus struct {
-			Done     bool `json:"done"`
-			Response struct {
-				Videos []struct {
-					URI string `json:"uri"`
-				} `json:"videos"`
-			} `json:"response"`
-			Error *apiError `json:"error,omitempty"`
-		}
-
-		if err := json.Unmarshal(body, &opStatus); err != nil {
-			continue
-		}
-
-		if opStatus.Error != nil {
-			return "", fmt.Errorf("video generation failed: %s", opStatus.Error.Message)
-		}
-
-		if opStatus.Done {
-			if len(opStatus.Response.Videos) > 0 {
-				return opStatus.Response.Videos[0].URI, nil
-			}
-			return "", fmt.Errorf("video generation completed but no video returned")
-		}
-	}
-
-	return "", fmt.Errorf("video generation timed out")
-}
-
-// GenerateVideoFromImages generates a video from multiple images
-func (c *GeminiClient) GenerateVideoFromImages(ctx context.Context, imagePaths []string, prompt string) (string, error) {
-	// Use Veo with image inputs
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=%s", c.apiKey)
-
-	// Encode all images
-	var imageInputs []map[string]interface{}
-	for _, path := range imagePaths {
-		imageData, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("failed to read image %s: %w", path, err)
-		}
-		mimeType := getMimeType(path)
-		encoded := base64.StdEncoding.EncodeToString(imageData)
-
-		imageInputs = append(imageInputs, map[string]interface{}{
-			"image": map[string]string{
-				"bytesBase64Encoded": encoded,
-				"mimeType":           mimeType,
-			},
-		})
-	}
-
-	reqBody := map[string]interface{}{
-		"instances": []map[string]interface{}{
-			{
-				"prompt": prompt,
-				"images": imageInputs,
-			},
-		},
-		"parameters": map[string]interface{}{
-			"sampleCount": 1,
-			"durationSec": 5,
 			"aspectRatio": "16:9",
 		},
 	}
@@ -490,6 +349,19 @@ func (c *GeminiClient) GenerateVideoFromImages(ctx context.Context, imagePaths [
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// Check for error response
+	if resp.StatusCode != 200 {
+		var errResp struct {
+			Error *apiError `json:"error,omitempty"`
+		}
+		json.Unmarshal(body, &errResp)
+		if errResp.Error != nil {
+			return "", fmt.Errorf("API error: %s (code %d)", errResp.Error.Message, errResp.Error.Code)
+		}
+		return "", fmt.Errorf("API error: status %d - %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response - this returns an operation name for polling
 	var opResp struct {
 		Name  string    `json:"name"`
 		Error *apiError `json:"error,omitempty"`
@@ -503,5 +375,220 @@ func (c *GeminiClient) GenerateVideoFromImages(ctx context.Context, imagePaths [
 		return "", fmt.Errorf("API error: %s (code %d)", opResp.Error.Message, opResp.Error.Code)
 	}
 
+	if opResp.Name == "" {
+		return "", fmt.Errorf("no operation name returned. Response: %s", string(body))
+	}
+
+	// Poll for completion
 	return c.pollVideoOperation(ctx, opResp.Name)
+}
+
+// pollVideoOperation polls for video generation completion
+func (c *GeminiClient) pollVideoOperation(ctx context.Context, operationName string) (string, error) {
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/%s?key=%s", operationName, c.apiKey)
+
+	for i := 0; i < 120; i++ { // Poll for up to 10 minutes
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+
+		fmt.Printf("⏳ Polling for video completion (%d/120)...\n", i+1)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return "", fmt.Errorf("failed to create request: %w", err)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			continue // Retry on network error
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+
+		// Try parsing with different response formats
+		var opStatus struct {
+			Done     bool `json:"done"`
+			Response struct {
+				// Veo 3.1 format
+				GenerateVideoResponse struct {
+					GeneratedSamples []struct {
+						Video struct {
+							URI string `json:"uri"`
+						} `json:"video"`
+					} `json:"generatedSamples"`
+				} `json:"generateVideoResponse"`
+				// Alternative format
+				GeneratedVideos []struct {
+					Video struct {
+						URI string `json:"uri"`
+					} `json:"video"`
+				} `json:"generatedVideos"`
+			} `json:"response"`
+			Error *apiError `json:"error,omitempty"`
+		}
+
+		if err := json.Unmarshal(body, &opStatus); err != nil {
+			fmt.Printf("Parse error: %v, body: %s\n", err, string(body)[:min(200, len(body))])
+			continue
+		}
+
+		if opStatus.Error != nil {
+			return "", fmt.Errorf("video generation failed: %s", opStatus.Error.Message)
+		}
+
+		if opStatus.Done {
+			// Try generateVideoResponse format first
+			if len(opStatus.Response.GenerateVideoResponse.GeneratedSamples) > 0 {
+				uri := opStatus.Response.GenerateVideoResponse.GeneratedSamples[0].Video.URI
+				if uri != "" {
+					return uri, nil
+				}
+			}
+			// Try generatedVideos format
+			if len(opStatus.Response.GeneratedVideos) > 0 {
+				uri := opStatus.Response.GeneratedVideos[0].Video.URI
+				if uri != "" {
+					return uri, nil
+				}
+			}
+			return "", fmt.Errorf("video generation completed but no video URI found. Response: %s", string(body))
+		}
+	}
+
+	return "", fmt.Errorf("video generation timed out after 10 minutes")
+}
+
+// GenerateVideoFromImages generates a video from multiple images
+func (c *GeminiClient) GenerateVideoFromImages(ctx context.Context, imagePaths []string, prompt string) (string, error) {
+	// Use Veo 3.1 with first frame image
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning?key=%s", c.apiKey)
+
+	// Use first image as starting frame
+	if len(imagePaths) == 0 {
+		return "", fmt.Errorf("no images provided")
+	}
+
+	imageData, err := os.ReadFile(imagePaths[0])
+	if err != nil {
+		return "", fmt.Errorf("failed to read image %s: %w", imagePaths[0], err)
+	}
+	mimeType := getMimeType(imagePaths[0])
+	encoded := base64.StdEncoding.EncodeToString(imageData)
+
+	reqBody := map[string]interface{}{
+		"instances": []map[string]interface{}{
+			{
+				"prompt": prompt,
+				"image": map[string]interface{}{
+					"bytesBase64Encoded": encoded,
+					"mimeType":           mimeType,
+				},
+			},
+		},
+		"parameters": map[string]interface{}{
+			"aspectRatio": "16:9",
+		},
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Check for error response
+	if resp.StatusCode != 200 {
+		var errResp struct {
+			Error *apiError `json:"error,omitempty"`
+		}
+		json.Unmarshal(body, &errResp)
+		if errResp.Error != nil {
+			return "", fmt.Errorf("API error: %s (code %d)", errResp.Error.Message, errResp.Error.Code)
+		}
+		return "", fmt.Errorf("API error: status %d - %s", resp.StatusCode, string(body))
+	}
+
+	var opResp struct {
+		Name  string    `json:"name"`
+		Error *apiError `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(body, &opResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if opResp.Error != nil {
+		return "", fmt.Errorf("API error: %s (code %d)", opResp.Error.Message, opResp.Error.Code)
+	}
+
+	if opResp.Name == "" {
+		return "", fmt.Errorf("no operation name returned. Response: %s", string(body))
+	}
+
+	return c.pollVideoOperation(ctx, opResp.Name)
+}
+
+// DownloadFile downloads a file from the Gemini API and saves it locally
+func (c *GeminiClient) DownloadFile(ctx context.Context, fileURI string, outputPath string) (string, error) {
+	// Add API key to the URI
+	downloadURL := fileURI
+	if strings.Contains(downloadURL, "?") {
+		downloadURL += "&key=" + c.apiKey
+	} else {
+		downloadURL += "?key=" + c.apiKey
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("download failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Create output file
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	// Copy response body to file
+	_, err = io.Copy(outFile, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return outputPath, nil
 }

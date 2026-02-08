@@ -287,6 +287,20 @@ func (r *Runtime) search(ctx context.Context, query string) (string, error) {
 
 // save writes content to a file
 func (r *Runtime) save(path, content string) (string, error) {
+	// Check if content is a Gemini file URI that needs downloading
+	if strings.HasPrefix(content, "https://generativelanguage.googleapis.com/") && strings.Contains(content, "/files/") {
+		if r.gemini != nil {
+			fmt.Printf("📥 Downloading to %s...\n", path)
+			savedPath, err := r.gemini.DownloadFile(context.Background(), content, path)
+			if err != nil {
+				return "", fmt.Errorf("failed to download file: %w", err)
+			}
+			return fmt.Sprintf("✅ Downloaded and saved to %s", savedPath), nil
+		}
+		return "", fmt.Errorf("GEMINI_API_KEY required to download file")
+	}
+
+	// Regular file save
 	dir := filepath.Dir(path)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -611,7 +625,7 @@ func (r *Runtime) sheetCreate(ctx context.Context, title string, content string)
 		if err != nil {
 			return "", fmt.Errorf("failed to create Sheet: %w", err)
 		}
-		
+
 		// If there's content, append it
 		if content != "" {
 			err = r.google.AppendToSheet(ctx, sheet.SpreadsheetId, "", content)
@@ -619,7 +633,7 @@ func (r *Runtime) sheetCreate(ctx context.Context, title string, content string)
 				return "", fmt.Errorf("failed to add data to Sheet: %w", err)
 			}
 		}
-		
+
 		return fmt.Sprintf("✅ Google Sheet created: %s\nLink: %s", sheet.Properties.Title, sheet.SpreadsheetUrl), nil
 	}
 
@@ -816,7 +830,10 @@ func (r *Runtime) videoGenerate(ctx context.Context, prompt string, input string
 		return "", fmt.Errorf("video generation failed: %w", err)
 	}
 
-	return fmt.Sprintf("✅ Video generated!\nURI: %s", videoURI), nil
+	fmt.Printf("✅ Video generated!\n")
+
+	// Return the URI - can be piped to save command
+	return videoURI, nil
 }
 
 // imagesToVideo generates a video from multiple images
@@ -829,7 +846,7 @@ func (r *Runtime) imagesToVideo(ctx context.Context, imagesArg string, prompt st
 
 	// Parse image paths - support comma, space, or newline separated
 	var imagePaths []string
-	
+
 	if imagesArg != "" {
 		// Replace newlines and commas with spaces, then split
 		normalized := strings.ReplaceAll(imagesArg, "\n", " ")
@@ -848,7 +865,7 @@ func (r *Runtime) imagesToVideo(ctx context.Context, imagesArg string, prompt st
 			}
 		}
 	}
-	
+
 	// Also check if prompt/input contains file paths (from previous command output)
 	if len(imagePaths) == 0 && prompt != "" {
 		normalized := strings.ReplaceAll(prompt, "\n", " ")
