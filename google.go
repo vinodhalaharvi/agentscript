@@ -15,6 +15,7 @@ import (
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/forms/v1"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
 	"google.golang.org/api/people/v1"
@@ -33,6 +34,7 @@ type GoogleClient struct {
 	tasks    *tasks.Service
 	people   *people.Service
 	youtube  *youtube.Service
+	forms    *forms.Service
 	timezone string // User's timezone from calendar settings
 }
 
@@ -66,6 +68,8 @@ func NewGoogleClient(ctx context.Context, credentialsFile, tokenFile string) (*G
 		// YouTube - read and upload
 		youtube.YoutubeReadonlyScope,
 		youtube.YoutubeUploadScope,
+		// Forms - full access
+		forms.FormsBodyScope,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse credentials: %w", err)
@@ -121,6 +125,11 @@ func NewGoogleClient(ctx context.Context, credentialsFile, tokenFile string) (*G
 		return nil, fmt.Errorf("unable to create YouTube service: %w", err)
 	}
 
+	formsSvc, err := forms.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		return nil, fmt.Errorf("unable to create Forms service: %w", err)
+	}
+
 	// Get user's timezone from calendar settings
 	tz := "America/Los_Angeles" // default
 	calSettings, err := calendarSvc.Settings.Get("timezone").Do()
@@ -137,6 +146,7 @@ func NewGoogleClient(ctx context.Context, credentialsFile, tokenFile string) (*G
 		tasks:    tasksSvc,
 		people:   peopleSvc,
 		youtube:  youtubeSvc,
+		forms:    formsSvc,
 		timezone: tz,
 	}, nil
 }
@@ -603,4 +613,148 @@ func (g *GoogleClient) UploadToYouTube(ctx context.Context, videoPath, title, de
 
 	videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", response.Id)
 	return videoURL, nil
+}
+
+// ============================================================================
+// Forms
+// ============================================================================
+
+// FormQuestion represents a question to add to a form
+type FormQuestion struct {
+	Title    string   `json:"title"`
+	Type     string   `json:"type"` // text, paragraph, multiple_choice, checkbox, dropdown
+	Required bool     `json:"required"`
+	Options  []string `json:"options,omitempty"` // for multiple choice/checkbox/dropdown
+}
+
+// CreateForm creates a Google Form with the given title and questions
+func (g *GoogleClient) CreateForm(ctx context.Context, title string, description string, questions []FormQuestion) (string, string, error) {
+	// First create an empty form
+	form := &forms.Form{
+		Info: &forms.Info{
+			Title:         title,
+			DocumentTitle: title,
+		},
+	}
+
+	createdForm, err := g.forms.Forms.Create(form).Do()
+	if err != nil {
+		return "", "", fmt.Errorf("unable to create form: %w", err)
+	}
+
+	// Add description if provided (separate call)
+	if description != "" {
+		_, err = g.forms.Forms.BatchUpdate(createdForm.FormId, &forms.BatchUpdateFormRequest{
+			Requests: []*forms.Request{{
+				UpdateFormInfo: &forms.UpdateFormInfoRequest{
+					Info: &forms.Info{
+						Description: description,
+					},
+					UpdateMask: "description",
+				},
+			}},
+		}).Do()
+		// Ignore error for description, continue with questions
+	}
+
+	// Add each question - add one at a time to handle index properly
+	for i, q := range questions {
+		item := &forms.Item{
+			Title: q.Title,
+		}
+
+		switch q.Type {
+		case "text", "short_answer":
+			item.QuestionItem = &forms.QuestionItem{
+				Question: &forms.Question{
+					Required: q.Required,
+					TextQuestion: &forms.TextQuestion{
+						Paragraph: false,
+					},
+				},
+			}
+		case "paragraph", "long_answer":
+			item.QuestionItem = &forms.QuestionItem{
+				Question: &forms.Question{
+					Required: q.Required,
+					TextQuestion: &forms.TextQuestion{
+						Paragraph: true,
+					},
+				},
+			}
+		case "multiple_choice", "radio":
+			var options []*forms.Option
+			for _, opt := range q.Options {
+				options = append(options, &forms.Option{Value: opt})
+			}
+			item.QuestionItem = &forms.QuestionItem{
+				Question: &forms.Question{
+					Required: q.Required,
+					ChoiceQuestion: &forms.ChoiceQuestion{
+						Type:    "RADIO",
+						Options: options,
+					},
+				},
+			}
+		case "checkbox", "checkboxes":
+			var options []*forms.Option
+			for _, opt := range q.Options {
+				options = append(options, &forms.Option{Value: opt})
+			}
+			item.QuestionItem = &forms.QuestionItem{
+				Question: &forms.Question{
+					Required: q.Required,
+					ChoiceQuestion: &forms.ChoiceQuestion{
+						Type:    "CHECKBOX",
+						Options: options,
+					},
+				},
+			}
+		case "dropdown":
+			var options []*forms.Option
+			for _, opt := range q.Options {
+				options = append(options, &forms.Option{Value: opt})
+			}
+			item.QuestionItem = &forms.QuestionItem{
+				Question: &forms.Question{
+					Required: q.Required,
+					ChoiceQuestion: &forms.ChoiceQuestion{
+						Type:    "DROP_DOWN",
+						Options: options,
+					},
+				},
+			}
+		default:
+			// Default to text
+			item.QuestionItem = &forms.QuestionItem{
+				Question: &forms.Question{
+					Required: q.Required,
+					TextQuestion: &forms.TextQuestion{
+						Paragraph: false,
+					},
+				},
+			}
+		}
+
+		// Add each item one at a time
+		_, err = g.forms.Forms.BatchUpdate(createdForm.FormId, &forms.BatchUpdateFormRequest{
+			Requests: []*forms.Request{{
+				CreateItem: &forms.CreateItemRequest{
+					Item: item,
+					Location: &forms.Location{
+						Index:           int64(i),
+						ForceSendFields: []string{"Index"},
+					},
+				},
+			}},
+		}).Do()
+		if err != nil {
+			return "", "", fmt.Errorf("unable to add question %d: %w", i+1, err)
+		}
+	}
+
+	formURL := createdForm.ResponderUri
+	editURL := fmt.Sprintf("https://docs.google.com/forms/d/%s/edit", createdForm.FormId)
+
+	return formURL, editURL, nil
 }

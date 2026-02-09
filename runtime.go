@@ -253,6 +253,8 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		result, err = r.imageAudioMerge(ctx, cmd.Arg, input)
 	case "maps_trip":
 		result, err = r.mapsTrip(ctx, cmd.Arg, input)
+	case "form_create":
+		result, err = r.formCreate(ctx, cmd.Arg, input)
 	case "video_script":
 		result, err = r.videoScript(ctx, cmd.Arg, input)
 	case "confirm":
@@ -1374,6 +1376,108 @@ Return ONLY the JSON array, nothing else.`, input)
 	}
 	result += fmt.Sprintf("\nGoogle Maps Route:\n%s", mapsURL)
 
+	return result, nil
+}
+
+// formCreate creates a Google Form using LLM to generate questions
+func (r *Runtime) formCreate(ctx context.Context, formTitle string, input string) (string, error) {
+	r.log("FORM_CREATE: %s", formTitle)
+
+	if r.gemini == nil {
+		return "", fmt.Errorf("GEMINI_API_KEY required for form_create")
+	}
+
+	// Use Gemini to generate form questions from input
+	prompt := fmt.Sprintf(`Based on this context, create a survey/form with appropriate questions.
+
+Return ONLY a valid JSON object with this structure:
+{
+  "title": "Form Title",
+  "description": "Brief description of the form",
+  "questions": [
+    {"title": "Question text", "type": "text", "required": true},
+    {"title": "Multiple choice question", "type": "multiple_choice", "required": true, "options": ["Option 1", "Option 2", "Option 3"]},
+    {"title": "Checkbox question", "type": "checkbox", "required": false, "options": ["Choice A", "Choice B"]}
+  ]
+}
+
+Question types: text, paragraph, multiple_choice, checkbox, dropdown
+
+Context: %s
+Form title hint: %s
+
+Return ONLY the JSON, no explanation.`, input, formTitle)
+
+	parsed, err := r.geminiCall(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate form questions: %w", err)
+	}
+
+	// Clean up response
+	parsed = strings.TrimSpace(parsed)
+	parsed = strings.TrimPrefix(parsed, "```json")
+	parsed = strings.TrimPrefix(parsed, "```")
+	parsed = strings.TrimSuffix(parsed, "```")
+	parsed = strings.TrimSpace(parsed)
+
+	var formData struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Questions   []struct {
+			Title    string   `json:"title"`
+			Type     string   `json:"type"`
+			Required bool     `json:"required"`
+			Options  []string `json:"options"`
+		} `json:"questions"`
+	}
+
+	if err := json.Unmarshal([]byte(parsed), &formData); err != nil {
+		return "", fmt.Errorf("failed to parse form JSON: %w\nResponse: %s", err, parsed)
+	}
+
+	if formTitle != "" {
+		formData.Title = formTitle
+	}
+
+	if r.google == nil {
+		// Simulate if no Google client
+		fmt.Printf("\n📋 ========== FORM (Simulated) ==========\n")
+		fmt.Printf("Title: %s\n", formData.Title)
+		fmt.Printf("Description: %s\n", formData.Description)
+		fmt.Printf("Questions:\n")
+		for i, q := range formData.Questions {
+			fmt.Printf("  %d. %s (%s)\n", i+1, q.Title, q.Type)
+			if len(q.Options) > 0 {
+				fmt.Printf("     Options: %v\n", q.Options)
+			}
+		}
+		fmt.Println("📋 =========================================")
+		fmt.Println("(Simulated - set GOOGLE_CREDENTIALS_FILE for real form)")
+		return fmt.Sprintf("Form simulated: %s with %d questions", formData.Title, len(formData.Questions)), nil
+	}
+
+	// Convert to FormQuestion slice
+	var questions []FormQuestion
+	for _, q := range formData.Questions {
+		questions = append(questions, FormQuestion{
+			Title:    q.Title,
+			Type:     q.Type,
+			Required: q.Required,
+			Options:  q.Options,
+		})
+	}
+
+	// Create real form
+	formURL, editURL, err := r.google.CreateForm(ctx, formData.Title, formData.Description, questions)
+	if err != nil {
+		return "", fmt.Errorf("failed to create form: %w", err)
+	}
+
+	fmt.Printf("✅ Form created: %s\n", formData.Title)
+	fmt.Printf("📋 Fill out: %s\n", formURL)
+	fmt.Printf("✏️ Edit: %s\n", editURL)
+
+	result := fmt.Sprintf("Form created: %s\n\nShare this link to collect responses:\n%s\n\nEdit form:\n%s", formData.Title, formURL, editURL)
 	return result, nil
 }
 
