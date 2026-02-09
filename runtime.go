@@ -258,6 +258,10 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		result, err = r.formCreate(ctx, cmd.Arg, input)
 	case "form_responses":
 		result, err = r.formResponses(ctx, cmd.Arg, input)
+	case "translate":
+		result, err = r.translate(ctx, cmd.Arg, input)
+	case "places_search":
+		result, err = r.placesSearch(ctx, cmd.Arg, input)
 	case "video_script":
 		result, err = r.videoScript(ctx, cmd.Arg, input)
 	case "confirm":
@@ -1583,6 +1587,77 @@ func (r *Runtime) formResponses(ctx context.Context, formId string, input string
 	}
 
 	return result.String(), nil
+}
+
+// translate translates text to a target language using Gemini
+func (r *Runtime) translate(ctx context.Context, targetLang string, input string) (string, error) {
+	r.log("TRANSLATE: to %s, input=%d bytes", targetLang, len(input))
+
+	if r.gemini == nil {
+		return "", fmt.Errorf("GEMINI_API_KEY required for translate")
+	}
+
+	if input == "" {
+		return "", fmt.Errorf("no text to translate - pipe text into translate")
+	}
+
+	if targetLang == "" {
+		targetLang = "Spanish"
+	}
+
+	prompt := fmt.Sprintf("Translate the following text to %s. Return ONLY the translated text, nothing else:\n\n%s", targetLang, input)
+
+	fmt.Printf("🌐 Translating to %s...\n", targetLang)
+
+	translated, err := r.geminiCall(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("translation failed: %w", err)
+	}
+
+	fmt.Printf("✅ Translation complete\n")
+	return translated, nil
+}
+
+// placesSearch searches for places using Google Places API (via Gemini for now)
+func (r *Runtime) placesSearch(ctx context.Context, query string, input string) (string, error) {
+	r.log("PLACES_SEARCH: %s", query)
+
+	if r.gemini == nil {
+		return "", fmt.Errorf("GEMINI_API_KEY required for places_search")
+	}
+
+	// Combine query and input
+	searchQuery := query
+	if input != "" && query == "" {
+		searchQuery = input
+	} else if input != "" {
+		searchQuery = query + " near " + input
+	}
+
+	if searchQuery == "" {
+		return "", fmt.Errorf("no search query - provide query as argument or pipe location")
+	}
+
+	prompt := fmt.Sprintf(`Search for places: %s
+
+Return a list of 10 places with the following information for each:
+- Name
+- Address  
+- Rating (out of 5)
+- Brief description
+- Google Maps link (format: https://www.google.com/maps/search/PLACE+NAME+ADDRESS)
+
+Format as a numbered list.`, searchQuery)
+
+	fmt.Printf("📍 Searching for places: %s...\n", searchQuery)
+
+	result, err := r.geminiCall(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("places search failed: %w", err)
+	}
+
+	fmt.Printf("✅ Found places\n")
+	return result, nil
 }
 
 // videoScript converts content into a Veo-optimized video prompt with synchronized dialogue
