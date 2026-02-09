@@ -11,4 +11,3 @@ parallel {
         search "Rust backend" -> analyze
     } -> merge -> ask "summarize backend options"
 } -> merge -> ask "Create a full-stack technology recommendation"
--> email "vinod.halaharvi@gmail.com"
