@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -255,6 +256,8 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		result, err = r.mapsTrip(ctx, cmd.Arg, input)
 	case "form_create":
 		result, err = r.formCreate(ctx, cmd.Arg, input)
+	case "form_responses":
+		result, err = r.formResponses(ctx, cmd.Arg, input)
 	case "video_script":
 		result, err = r.videoScript(ctx, cmd.Arg, input)
 	case "confirm":
@@ -460,34 +463,46 @@ func (r *Runtime) list(path string) (string, error) {
 func (r *Runtime) email(ctx context.Context, to string, content string) (string, error) {
 	r.log("EMAIL to: %s", to)
 
-	// Use Gemini to format the email and extract subject
-	prompt := fmt.Sprintf(`Format this content as a professional email. 
-Return ONLY a JSON object with "subject" and "body" fields. No markdown.
+	// Use Gemini to format as a beautiful HTML email
+	prompt := fmt.Sprintf(`Format this content as a professional HTML email.
+Return ONLY a JSON object with "subject" and "html" fields.
+
+The HTML should:
+- Have a nice header with "AgentScript" branding (use inline CSS, blue gradient background #667eea to #764ba2)
+- Make all URLs clickable with proper <a href> tags styled as blue buttons
+- Use clean, modern styling with good spacing
+- Include a subtle footer
+- Be mobile-responsive
 
 Content to include:
-%s`, content)
+%s
 
-	var subject, body string
+Return ONLY valid JSON like: {"subject": "...", "html": "<html>...</html>"}`, content)
+
+	var subject, htmlBody string
 
 	if r.gemini != nil {
 		formatted, err := r.geminiCall(ctx, prompt)
 		if err == nil {
-			// Try to parse JSON response
+			// Clean up response
+			formatted = strings.TrimSpace(formatted)
+			formatted = strings.TrimPrefix(formatted, "```json")
+			formatted = strings.TrimPrefix(formatted, "```")
+			formatted = strings.TrimSuffix(formatted, "```")
+			formatted = strings.TrimSpace(formatted)
+
 			var emailData struct {
 				Subject string `json:"subject"`
-				Body    string `json:"body"`
+				HTML    string `json:"html"`
+				Body    string `json:"body"` // fallback
 			}
 			if json.Unmarshal([]byte(formatted), &emailData) == nil && emailData.Subject != "" {
 				subject = emailData.Subject
-				body = emailData.Body
-			} else {
-				// Fallback: use first line as subject
-				lines := strings.SplitN(formatted, "\n", 2)
-				subject = strings.TrimPrefix(lines[0], "Subject: ")
-				if len(lines) > 1 {
-					body = lines[1]
-				} else {
-					body = content
+				if emailData.HTML != "" {
+					htmlBody = emailData.HTML
+				} else if emailData.Body != "" {
+					// Wrap plain body in basic HTML
+					htmlBody = wrapInHTMLEmail(emailData.Body)
 				}
 			}
 		}
@@ -495,12 +510,12 @@ Content to include:
 
 	if subject == "" {
 		subject = "AgentScript Report"
-		body = content
+		htmlBody = wrapInHTMLEmail(content)
 	}
 
 	// If Google client is available, send real email
 	if r.google != nil {
-		err := r.google.SendEmail(ctx, to, subject, body)
+		err := r.google.SendHTMLEmail(ctx, to, subject, htmlBody)
 		if err != nil {
 			return "", fmt.Errorf("failed to send email: %w", err)
 		}
@@ -509,11 +524,43 @@ Content to include:
 
 	// Fallback: simulate sending
 	fmt.Printf("\n📧 ========== EMAIL TO: %s ==========\n", to)
-	fmt.Printf("Subject: %s\n\n%s\n", subject, body)
+	fmt.Printf("Subject: %s\n\n[HTML Email]\n", subject)
 	fmt.Println("📧 ======================================")
 	fmt.Println("(Simulated - set GOOGLE_CREDENTIALS_FILE for real email)")
 
 	return fmt.Sprintf("Email simulated to %s", to), nil
+}
+
+// wrapInHTMLEmail wraps plain text in a nice HTML template
+func wrapInHTMLEmail(content string) string {
+	// Convert URLs to clickable button-style links
+	urlRegex := regexp.MustCompile(`(https?://[^\s<>"]+)`)
+	content = urlRegex.ReplaceAllString(content, `<a href="$1" style="display:inline-block;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:10px 20px;border-radius:5px;text-decoration:none;margin:5px 0;">$1</a>`)
+
+	// Convert newlines to breaks
+	content = strings.ReplaceAll(content, "\n", "<br>\n")
+
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background-color:#f5f5f5;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;">
+    <div style="background:linear-gradient(135deg,#667eea 0%%,#764ba2 100%%);padding:30px;text-align:center;">
+      <h1 style="color:#fff;margin:0;font-size:28px;">🚀 AgentScript</h1>
+      <p style="color:rgba(255,255,255,0.8);margin:5px 0 0 0;font-size:14px;">AI-Powered Automation</p>
+    </div>
+    <div style="padding:30px;line-height:1.8;color:#333;">
+      %s
+    </div>
+    <div style="background:#f9f9f9;padding:20px;text-align:center;font-size:12px;color:#888;border-top:1px solid #eee;">
+      <p style="margin:0;">Sent via <strong>AgentScript</strong> • Powered by Gemini</p>
+    </div>
+  </div>
+</body>
+</html>`, content)
 }
 
 // calendar creates a Google Calendar event
@@ -1479,6 +1526,63 @@ Return ONLY the JSON, no explanation.`, input, formTitle)
 
 	result := fmt.Sprintf("Form created: %s\n\nShare this link to collect responses:\n%s\n\nEdit form:\n%s", formData.Title, formURL, editURL)
 	return result, nil
+}
+
+// formResponses retrieves responses from a Google Form
+func (r *Runtime) formResponses(ctx context.Context, formId string, input string) (string, error) {
+	r.log("FORM_RESPONSES: %s", formId)
+
+	// If formId not provided as arg, try to extract from input
+	if formId == "" {
+		// Try to find form ID in input (from previous form_create output)
+		if strings.Contains(input, "forms/d/") {
+			parts := strings.Split(input, "forms/d/")
+			if len(parts) > 1 {
+				formId = strings.Split(parts[1], "/")[0]
+			}
+		}
+	}
+
+	if formId == "" {
+		return "", fmt.Errorf("form ID required - provide as argument or pipe from form_create")
+	}
+
+	if r.google == nil {
+		return "", fmt.Errorf("GOOGLE_CREDENTIALS_FILE required for form_responses")
+	}
+
+	responses, err := r.google.GetFormResponses(ctx, formId)
+	if err != nil {
+		return "", fmt.Errorf("failed to get responses: %w", err)
+	}
+
+	if len(responses) == 0 {
+		return "No responses yet.", nil
+	}
+
+	fmt.Printf("📊 Found %d responses\n", len(responses))
+
+	// Format responses
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Form Responses (%d total):\n\n", len(responses)))
+
+	for i, resp := range responses {
+		result.WriteString(fmt.Sprintf("--- Response %d ---\n", i+1))
+		if email, ok := resp["respondent"].(string); ok && email != "" {
+			result.WriteString(fmt.Sprintf("From: %s\n", email))
+		}
+		if submitted, ok := resp["submitted"].(string); ok && submitted != "" {
+			result.WriteString(fmt.Sprintf("Submitted: %s\n", submitted))
+		}
+		if answers, ok := resp["answers"].(map[string]string); ok {
+			for question, answer := range answers {
+				result.WriteString(fmt.Sprintf("Q: %s\nA: %s\n", question, answer))
+			}
+		}
+		result.WriteString("\n")
+	}
+
+	return result.String(), nil
 }
 
 // videoScript converts content into a Veo-optimized video prompt with synchronized dialogue

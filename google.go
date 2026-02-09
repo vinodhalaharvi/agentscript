@@ -70,6 +70,7 @@ func NewGoogleClient(ctx context.Context, credentialsFile, tokenFile string) (*G
 		youtube.YoutubeUploadScope,
 		// Forms - full access
 		forms.FormsBodyScope,
+		forms.FormsResponsesReadonlyScope,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse credentials: %w", err)
@@ -259,6 +260,32 @@ func (g *GoogleClient) SendEmail(ctx context.Context, to, subject, body string) 
 	// Create email message
 	msgStr := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
 		from, to, subject, body)
+
+	msg := &gmail.Message{
+		Raw: base64.URLEncoding.EncodeToString([]byte(msgStr)),
+	}
+
+	// Send
+	_, err = g.gmail.Users.Messages.Send("me", msg).Do()
+	if err != nil {
+		return fmt.Errorf("unable to send email: %w", err)
+	}
+
+	return nil
+}
+
+// SendHTMLEmail sends an HTML email via Gmail API
+func (g *GoogleClient) SendHTMLEmail(ctx context.Context, to, subject, htmlBody string) error {
+	// Get user's email address
+	profile, err := g.gmail.Users.GetProfile("me").Do()
+	if err != nil {
+		return fmt.Errorf("unable to get user profile: %w", err)
+	}
+	from := profile.EmailAddress
+
+	// Create email message with HTML content type
+	msgStr := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		from, to, subject, htmlBody)
 
 	msg := &gmail.Message{
 		Raw: base64.URLEncoding.EncodeToString([]byte(msgStr)),
@@ -757,4 +784,53 @@ func (g *GoogleClient) CreateForm(ctx context.Context, title string, description
 	editURL := fmt.Sprintf("https://docs.google.com/forms/d/%s/edit", createdForm.FormId)
 
 	return formURL, editURL, nil
+}
+
+// GetFormResponses retrieves all responses from a Google Form
+func (g *GoogleClient) GetFormResponses(ctx context.Context, formId string) ([]map[string]interface{}, error) {
+	// Get form to understand questions
+	form, err := g.forms.Forms.Get(formId).Do()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get form: %w", err)
+	}
+
+	// Build question ID to title map
+	questionMap := make(map[string]string)
+	for _, item := range form.Items {
+		if item.QuestionItem != nil && item.QuestionItem.Question != nil {
+			questionMap[item.QuestionItem.Question.QuestionId] = item.Title
+		}
+	}
+
+	// Get responses
+	responses, err := g.forms.Forms.Responses.List(formId).Do()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get responses: %w", err)
+	}
+
+	var results []map[string]interface{}
+	for _, resp := range responses.Responses {
+		entry := make(map[string]interface{})
+		entry["respondent"] = resp.RespondentEmail
+		entry["submitted"] = resp.LastSubmittedTime
+
+		answers := make(map[string]string)
+		for qID, answer := range resp.Answers {
+			questionTitle := questionMap[qID]
+			if questionTitle == "" {
+				questionTitle = qID
+			}
+			if answer.TextAnswers != nil && len(answer.TextAnswers.Answers) > 0 {
+				var vals []string
+				for _, a := range answer.TextAnswers.Answers {
+					vals = append(vals, a.Value)
+				}
+				answers[questionTitle] = strings.Join(vals, ", ")
+			}
+		}
+		entry["answers"] = answers
+		results = append(results, entry)
+	}
+
+	return results, nil
 }
