@@ -21,6 +21,7 @@ import (
 type GitHubClient struct {
 	httpClient *http.Client
 	username   string
+	token      *oauth2.Token
 }
 
 // NewGitHubClient creates a new GitHub client with OAuth2
@@ -58,6 +59,7 @@ func NewGitHubClient(ctx context.Context, clientID, clientSecret, tokenFile stri
 	return &GitHubClient{
 		httpClient: client,
 		username:   username,
+		token:      token,
 	}, nil
 }
 

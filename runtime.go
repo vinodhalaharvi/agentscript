@@ -22,6 +22,7 @@ type Runtime struct {
 	google    *GoogleClient
 	github    *GitHubClient
 	claude    *ClaudeClient
+	mcp       *MCPClient
 	verbose   bool
 	searchKey string
 }
@@ -85,6 +86,7 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 		google:    googleClient,
 		github:    githubClient,
 		claude:    claudeClient,
+		mcp:       NewMCPClient(),
 		verbose:   cfg.Verbose,
 		searchKey: cfg.SearchAPIKey,
 	}, nil
@@ -262,6 +264,12 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		result, err = r.translate(ctx, cmd.Arg, input)
 	case "places_search":
 		result, err = r.placesSearch(ctx, cmd.Arg, input)
+	case "mcp_connect":
+		result, err = r.mcpConnect(ctx, cmd.Arg, cmd.Arg2)
+	case "mcp_list":
+		result, err = r.mcpList(ctx, cmd.Arg, input)
+	case "mcp":
+		result, err = r.mcpCall(ctx, cmd.Arg, input)
 	case "video_script":
 		result, err = r.videoScript(ctx, cmd.Arg, input)
 	case "confirm":
@@ -1657,6 +1665,146 @@ Format as a numbered list.`, searchQuery)
 	}
 
 	fmt.Printf("✅ Found places\n")
+	return result, nil
+}
+
+// mcpConnect connects to an MCP server
+func (r *Runtime) mcpConnect(ctx context.Context, serverName string, command string) (string, error) {
+	r.log("MCP_CONNECT: name=%s, command=%s", serverName, command)
+
+	if serverName == "" {
+		return "", fmt.Errorf("server name required: mcp_connect \"name\" \"command\"")
+	}
+
+	// Command can come from arg or input
+	cmd := command
+	if cmd == "" {
+		return "", fmt.Errorf("command required: mcp_connect \"name\" \"npx -y @modelcontextprotocol/server-xxx\"")
+	}
+
+	// Check for required tokens and prompt for OAuth if missing
+	if strings.Contains(cmd, "server-github") && os.Getenv("GITHUB_TOKEN") == "" {
+		fmt.Println("🔑 GitHub token not found. Starting OAuth flow...")
+		if r.github == nil {
+			clientID := os.Getenv("GITHUB_CLIENT_ID")
+			clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
+			if clientID == "" || clientSecret == "" {
+				return "", fmt.Errorf("GITHUB_TOKEN not set. Either:\n  1. Set GITHUB_TOKEN environment variable, or\n  2. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET for OAuth")
+			}
+			tokenFile := os.Getenv("GITHUB_TOKEN_FILE")
+			if tokenFile == "" {
+				tokenFile = "github_token.json"
+			}
+			var err error
+			r.github, err = NewGitHubClient(ctx, clientID, clientSecret, tokenFile)
+			if err != nil {
+				return "", fmt.Errorf("GitHub OAuth failed: %w", err)
+			}
+		}
+		// Set token for MCP server
+		os.Setenv("GITHUB_TOKEN", r.github.token.AccessToken)
+		fmt.Println("✅ GitHub OAuth successful")
+	}
+
+	if strings.Contains(cmd, "server-slack") && os.Getenv("SLACK_TOKEN") == "" {
+		return "", fmt.Errorf("SLACK_TOKEN not set. Get a token from https://api.slack.com/apps")
+	}
+
+	if strings.Contains(cmd, "server-brave") && os.Getenv("BRAVE_API_KEY") == "" {
+		return "", fmt.Errorf("BRAVE_API_KEY not set. Get a key from https://brave.com/search/api/")
+	}
+
+	fmt.Printf("🔌 Connecting to MCP server '%s'...\n", serverName)
+	fmt.Printf("   Command: %s\n", cmd)
+
+	if err := r.mcp.Connect(ctx, serverName, cmd); err != nil {
+		return "", fmt.Errorf("failed to connect to MCP server: %w", err)
+	}
+
+	// List available tools
+	tools, err := r.mcp.ListTools(serverName)
+	if err != nil {
+		return "", fmt.Errorf("failed to list tools: %w", err)
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Connected to MCP server '%s'\n", serverName))
+	result.WriteString(fmt.Sprintf("Available tools (%d):\n", len(tools)))
+	for _, tool := range tools {
+		result.WriteString(fmt.Sprintf("  - %s: %s\n", tool.Name, tool.Description))
+	}
+
+	fmt.Printf("✅ Connected to '%s' with %d tools\n", serverName, len(tools))
+	return result.String(), nil
+}
+
+// mcpList lists available tools from a connected MCP server
+func (r *Runtime) mcpList(ctx context.Context, serverName string, input string) (string, error) {
+	r.log("MCP_LIST: server=%s", serverName)
+
+	// If no server specified, list all connected servers
+	if serverName == "" {
+		servers := r.mcp.ListServers()
+		if len(servers) == 0 {
+			return "No MCP servers connected. Use mcp_connect first.", nil
+		}
+		var result strings.Builder
+		result.WriteString("Connected MCP servers:\n")
+		for _, s := range servers {
+			tools, _ := r.mcp.ListTools(s)
+			result.WriteString(fmt.Sprintf("  - %s (%d tools)\n", s, len(tools)))
+		}
+		return result.String(), nil
+	}
+
+	tools, err := r.mcp.ListTools(serverName)
+	if err != nil {
+		return "", err
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Tools for '%s':\n", serverName))
+	for _, tool := range tools {
+		result.WriteString(fmt.Sprintf("\n%s\n", tool.Name))
+		result.WriteString(fmt.Sprintf("  Description: %s\n", tool.Description))
+		if tool.InputSchema != nil {
+			if props, ok := tool.InputSchema["properties"].(map[string]interface{}); ok {
+				result.WriteString("  Parameters:\n")
+				for name, schema := range props {
+					if s, ok := schema.(map[string]interface{}); ok {
+						result.WriteString(fmt.Sprintf("    - %s: %v\n", name, s["description"]))
+					}
+				}
+			}
+		}
+	}
+	return result.String(), nil
+}
+
+// mcpCall calls a tool on an MCP server
+func (r *Runtime) mcpCall(ctx context.Context, arg string, input string) (string, error) {
+	r.log("MCP_CALL: arg=%s, input=%s", arg, input)
+
+	// Parse arg: "server:tool" or just use input for args
+	parts := strings.SplitN(arg, ":", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid mcp call format. Use: mcp \"server:tool\" '{\"arg\": \"value\"}'")
+	}
+
+	serverName := strings.TrimSpace(parts[0])
+	toolName := strings.TrimSpace(parts[1])
+
+	// Args come from input
+	argsJSON := strings.TrimSpace(input)
+
+	fmt.Printf("🔧 Calling %s.%s...\n", serverName, toolName)
+
+	result, err := r.mcp.CallTool(ctx, serverName, toolName, argsJSON)
+	if err != nil {
+		return "", fmt.Errorf("MCP call failed: %w", err)
+	}
+
+	fmt.Printf("✅ MCP call complete\n")
 	return result, nil
 }
 
