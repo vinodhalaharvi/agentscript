@@ -1684,26 +1684,39 @@ func (r *Runtime) mcpConnect(ctx context.Context, serverName string, command str
 
 	// Check for required tokens and prompt for OAuth if missing
 	if strings.Contains(cmd, "server-github") && os.Getenv("GITHUB_TOKEN") == "" {
-		fmt.Println("🔑 GitHub token not found. Starting OAuth flow...")
-		if r.github == nil {
-			clientID := os.Getenv("GITHUB_CLIENT_ID")
-			clientSecret := os.Getenv("GITHUB_CLIENT_SECRET")
-			if clientID == "" || clientSecret == "" {
-				return "", fmt.Errorf("GITHUB_TOKEN not set. Either:\n  1. Set GITHUB_TOKEN environment variable, or\n  2. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET for OAuth")
+		fmt.Println("🔑 GitHub token not found.")
+
+		// Check for saved token first
+		tokenFile := "github_mcp_token.txt"
+		if data, err := os.ReadFile(tokenFile); err == nil && len(data) > 0 {
+			token := strings.TrimSpace(string(data))
+			os.Setenv("GITHUB_TOKEN", token)
+			fmt.Println("✅ Loaded GitHub token from", tokenFile)
+		} else {
+			// Open browser to create token
+			fmt.Println("\n📋 Opening browser to create a GitHub Personal Access Token...")
+			fmt.Println("   1. Sign in to GitHub")
+			fmt.Println("   2. Create a token with 'repo' scope")
+			fmt.Println("   3. Copy the token\n")
+
+			tokenURL := "https://github.com/settings/tokens/new?description=AgentScript%20MCP&scopes=repo,read:user"
+			exec.Command("open", tokenURL).Start()     // macOS
+			exec.Command("xdg-open", tokenURL).Start() // Linux
+
+			fmt.Print("Paste your GitHub token here: ")
+			var token string
+			fmt.Scanln(&token)
+			token = strings.TrimSpace(token)
+
+			if token == "" {
+				return "", fmt.Errorf("no token provided")
 			}
-			tokenFile := os.Getenv("GITHUB_TOKEN_FILE")
-			if tokenFile == "" {
-				tokenFile = "github_token.json"
-			}
-			var err error
-			r.github, err = NewGitHubClient(ctx, clientID, clientSecret, tokenFile)
-			if err != nil {
-				return "", fmt.Errorf("GitHub OAuth failed: %w", err)
-			}
+
+			// Save token for future use
+			os.WriteFile(tokenFile, []byte(token), 0600)
+			os.Setenv("GITHUB_TOKEN", token)
+			fmt.Println("✅ Token saved to", tokenFile)
 		}
-		// Set token for MCP server
-		os.Setenv("GITHUB_TOKEN", r.github.token.AccessToken)
-		fmt.Println("✅ GitHub OAuth successful")
 	}
 
 	if strings.Contains(cmd, "server-slack") && os.Getenv("SLACK_TOKEN") == "" {
