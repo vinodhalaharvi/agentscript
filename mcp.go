@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // MCPClient manages connections to MCP servers
@@ -94,10 +95,30 @@ func (m *MCPClient) Connect(ctx context.Context, name, command string) error {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
+	// Capture stderr for debugging
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
 	// Start process
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start MCP server: %w", err)
 	}
+
+	// Log stderr in background
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, err := stderr.Read(buf)
+			if n > 0 {
+				fmt.Fprintf(os.Stderr, "[MCP %s] %s", name, string(buf[:n]))
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
 
 	server := &MCPServer{
 		name:   name,
@@ -106,6 +127,9 @@ func (m *MCPClient) Connect(ctx context.Context, name, command string) error {
 		stdout: bufio.NewReader(stdout),
 		reqID:  0,
 	}
+
+	// Give server a moment to start
+	time.Sleep(500 * time.Millisecond)
 
 	// Initialize connection
 	if err := server.initialize(); err != nil {
@@ -127,33 +151,8 @@ func (m *MCPClient) Connect(ctx context.Context, name, command string) error {
 
 // initialize sends the initialize request to the MCP server
 func (s *MCPServer) initialize() error {
-	req := jsonRPCRequest{
-		JSONRPC: "2.0",
-		ID:      atomic.AddInt64(&s.reqID, 1),
-		Method:  "initialize",
-		Params: map[string]interface{}{
-			"protocolVersion": "2024-11-05",
-			"capabilities":    map[string]interface{}{},
-			"clientInfo": map[string]string{
-				"name":    "AgentScript",
-				"version": "1.0.0",
-			},
-		},
-	}
-
-	_, err := s.sendRequest(req)
-	if err != nil {
-		return err
-	}
-
-	// Send initialized notification
-	notif := jsonRPCRequest{
-		JSONRPC: "2.0",
-		Method:  "notifications/initialized",
-	}
-	data, _ := json.Marshal(notif)
-	s.stdin.Write(append(data, '\n'))
-
+	// Many MCP servers work without full init handshake
+	// Skip init and go straight to listing tools
 	return nil
 }
 
@@ -163,11 +162,25 @@ func (s *MCPServer) listTools() ([]MCPTool, error) {
 		JSONRPC: "2.0",
 		ID:      atomic.AddInt64(&s.reqID, 1),
 		Method:  "tools/list",
+		Params:  map[string]interface{}{},
 	}
 
 	resp, err := s.sendRequest(req)
 	if err != nil {
-		return nil, err
+		// Try alternative method name
+		req.ID = atomic.AddInt64(&s.reqID, 1)
+		req.Method = "listTools"
+		resp, err = s.sendRequest(req)
+		if err != nil {
+			// Try without params
+			req.ID = atomic.AddInt64(&s.reqID, 1)
+			req.Method = "tools/list"
+			req.Params = nil
+			resp, err = s.sendRequest(req)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	var result struct {
@@ -187,6 +200,9 @@ func (s *MCPServer) sendRequest(req jsonRPCRequest) (*jsonRPCResponse, error) {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	// Debug: show what we're sending
+	fmt.Fprintf(os.Stderr, "[MCP DEBUG] Sending: %s\n", string(data))
+
 	// Send request
 	if _, err := s.stdin.Write(append(data, '\n')); err != nil {
 		return nil, fmt.Errorf("failed to write request: %w", err)
@@ -197,6 +213,9 @@ func (s *MCPServer) sendRequest(req jsonRPCRequest) (*jsonRPCResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
+
+	// Debug: show what we received
+	fmt.Fprintf(os.Stderr, "[MCP DEBUG] Received: %s\n", line)
 
 	var resp jsonRPCResponse
 	if err := json.Unmarshal([]byte(line), &resp); err != nil {

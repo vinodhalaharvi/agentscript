@@ -269,7 +269,7 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 	case "mcp_list":
 		result, err = r.mcpList(ctx, cmd.Arg, input)
 	case "mcp":
-		result, err = r.mcpCall(ctx, cmd.Arg, input)
+		result, err = r.mcpCall(ctx, cmd.Arg, cmd.Arg2)
 	case "video_script":
 		result, err = r.videoScript(ctx, cmd.Arg, input)
 	case "confirm":
@@ -1782,10 +1782,10 @@ func (r *Runtime) mcpList(ctx context.Context, serverName string, input string) 
 }
 
 // mcpCall calls a tool on an MCP server
-func (r *Runtime) mcpCall(ctx context.Context, arg string, input string) (string, error) {
-	r.log("MCP_CALL: arg=%s, input=%s", arg, input)
+func (r *Runtime) mcpCall(ctx context.Context, arg string, argsJSON string) (string, error) {
+	r.log("MCP_CALL: arg=%s, argsJSON=%s", arg, argsJSON)
 
-	// Parse arg: "server:tool" or just use input for args
+	// Parse arg: "server:tool"
 	parts := strings.SplitN(arg, ":", 2)
 	if len(parts) != 2 {
 		return "", fmt.Errorf("invalid mcp call format. Use: mcp \"server:tool\" '{\"arg\": \"value\"}'")
@@ -1793,9 +1793,6 @@ func (r *Runtime) mcpCall(ctx context.Context, arg string, input string) (string
 
 	serverName := strings.TrimSpace(parts[0])
 	toolName := strings.TrimSpace(parts[1])
-
-	// Args come from input
-	argsJSON := strings.TrimSpace(input)
 
 	fmt.Printf("🔧 Calling %s.%s...\n", serverName, toolName)
 
