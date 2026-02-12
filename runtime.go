@@ -527,6 +527,32 @@ Return ONLY valid JSON like: {"subject": "...", "html": "<html>...</html>"}`, co
 
 	// If Google client is available, send real email
 	if r.google != nil {
+		// Check if content contains a file path (for attachments)
+		var attachmentPath string
+		lines := strings.Split(content, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasSuffix(line, ".png") || strings.HasSuffix(line, ".jpg") ||
+				strings.HasSuffix(line, ".jpeg") || strings.HasSuffix(line, ".pdf") ||
+				strings.HasSuffix(line, ".mp4") || strings.HasSuffix(line, ".wav") ||
+				strings.HasSuffix(line, ".mp3") {
+				// Check if file exists
+				if _, err := os.Stat(line); err == nil {
+					attachmentPath = line
+					break
+				}
+			}
+		}
+
+		if attachmentPath != "" {
+			// Send with attachment
+			err := r.google.SendEmailWithAttachment(ctx, to, subject, htmlBody, attachmentPath)
+			if err != nil {
+				return "", fmt.Errorf("failed to send email: %w", err)
+			}
+			return fmt.Sprintf("✅ Email sent to %s with attachment: %s", to, filepath.Base(attachmentPath)), nil
+		}
+
 		err := r.google.SendHTMLEmail(ctx, to, subject, htmlBody)
 		if err != nil {
 			return "", fmt.Errorf("failed to send email: %w", err)
@@ -1683,7 +1709,7 @@ func (r *Runtime) mcpConnect(ctx context.Context, serverName string, command str
 	}
 
 	// Check for required tokens and prompt for OAuth if missing
-	if strings.Contains(cmd, "server-github") && os.Getenv("GITHUB_TOKEN") == "" {
+	if strings.Contains(cmd, "server-github") && os.Getenv("GITHUB_TOKEN") == "" && os.Getenv("GITHUB_PERSONAL_ACCESS_TOKEN") == "" {
 		fmt.Println("🔑 GitHub token not found.")
 
 		// Check for saved token first
@@ -1691,6 +1717,7 @@ func (r *Runtime) mcpConnect(ctx context.Context, serverName string, command str
 		if data, err := os.ReadFile(tokenFile); err == nil && len(data) > 0 {
 			token := strings.TrimSpace(string(data))
 			os.Setenv("GITHUB_TOKEN", token)
+			os.Setenv("GITHUB_PERSONAL_ACCESS_TOKEN", token)
 			fmt.Println("✅ Loaded GitHub token from", tokenFile)
 		} else {
 			// Open browser to create token
@@ -1715,7 +1742,15 @@ func (r *Runtime) mcpConnect(ctx context.Context, serverName string, command str
 			// Save token for future use
 			os.WriteFile(tokenFile, []byte(token), 0600)
 			os.Setenv("GITHUB_TOKEN", token)
+			os.Setenv("GITHUB_PERSONAL_ACCESS_TOKEN", token)
 			fmt.Println("✅ Token saved to", tokenFile)
+		}
+	} else if strings.Contains(cmd, "server-github") {
+		// Ensure both env vars are set
+		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+			os.Setenv("GITHUB_PERSONAL_ACCESS_TOKEN", token)
+		} else if token := os.Getenv("GITHUB_PERSONAL_ACCESS_TOKEN"); token != "" {
+			os.Setenv("GITHUB_TOKEN", token)
 		}
 	}
 

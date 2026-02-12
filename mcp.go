@@ -239,12 +239,18 @@ func (m *MCPClient) CallTool(ctx context.Context, serverName, toolName, argsJSON
 		return "", fmt.Errorf("server '%s' not connected. Use mcp_connect first", serverName)
 	}
 
-	// Parse arguments
+	// Debug: show raw argsJSON
+	fmt.Fprintf(os.Stderr, "[MCP DEBUG] argsJSON raw: %q\n", argsJSON)
+
+	// Parse arguments - must be valid JSON object
 	var args map[string]interface{}
 	if argsJSON != "" {
+		// Trim any whitespace
+		argsJSON = strings.TrimSpace(argsJSON)
+
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			// Try as simple string
-			args = map[string]interface{}{"input": argsJSON}
+			fmt.Fprintf(os.Stderr, "[MCP DEBUG] JSON parse error: %v\n", err)
+			return "", fmt.Errorf("invalid JSON arguments: %w", err)
 		}
 	}
 

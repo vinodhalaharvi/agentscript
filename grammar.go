@@ -33,7 +33,7 @@ type Command struct {
 var scriptLexer = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "Comment", Pattern: `//[^\n]*\n?`},
 	{Name: "Keyword", Pattern: `(parallel|search|summarize|save|read|stdin|ask|analyze|list|merge|email|calendar|meet|drive_save|doc_create|sheet_append|sheet_create|task|contact_find|youtube_search|youtube_upload|youtube_shorts|image_generate|image_analyze|video_analyze|video_generate|images_to_video|text_to_speech|audio_video_merge|image_audio_merge|maps_trip|form_create|form_responses|translate|places_search|mcp_connect|mcp_list|mcp)`},
-	{Name: "String", Pattern: `"[^"]*"|'[^']*'`},
+	{Name: "String", Pattern: `"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`},
 	{Name: "Pipe", Pattern: `->`},
 	{Name: "LBrace", Pattern: `\{`},
 	{Name: "RBrace", Pattern: `\}`},

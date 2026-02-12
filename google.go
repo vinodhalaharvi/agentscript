@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -289,6 +291,85 @@ func (g *GoogleClient) SendHTMLEmail(ctx context.Context, to, subject, htmlBody 
 
 	msg := &gmail.Message{
 		Raw: base64.URLEncoding.EncodeToString([]byte(msgStr)),
+	}
+
+	// Send
+	_, err = g.gmail.Users.Messages.Send("me", msg).Do()
+	if err != nil {
+		return fmt.Errorf("unable to send email: %w", err)
+	}
+
+	return nil
+}
+
+// SendEmailWithAttachment sends an email with file attachment via Gmail API
+func (g *GoogleClient) SendEmailWithAttachment(ctx context.Context, to, subject, body, attachmentPath string) error {
+	// Get user's email address
+	profile, err := g.gmail.Users.GetProfile("me").Do()
+	if err != nil {
+		return fmt.Errorf("unable to get user profile: %w", err)
+	}
+	from := profile.EmailAddress
+
+	// Read attachment file
+	attachmentData, err := os.ReadFile(attachmentPath)
+	if err != nil {
+		return fmt.Errorf("unable to read attachment: %w", err)
+	}
+
+	// Get filename and mime type
+	filename := filepath.Base(attachmentPath)
+	mimeType := "application/octet-stream"
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".png":
+		mimeType = "image/png"
+	case ".jpg", ".jpeg":
+		mimeType = "image/jpeg"
+	case ".gif":
+		mimeType = "image/gif"
+	case ".pdf":
+		mimeType = "application/pdf"
+	case ".txt":
+		mimeType = "text/plain"
+	case ".mp4":
+		mimeType = "video/mp4"
+	case ".wav":
+		mimeType = "audio/wav"
+	case ".mp3":
+		mimeType = "audio/mpeg"
+	}
+
+	// Create boundary
+	boundary := "boundary_agentscript_" + fmt.Sprintf("%d", time.Now().UnixNano())
+
+	// Build multipart message
+	var msgBuf bytes.Buffer
+	msgBuf.WriteString(fmt.Sprintf("From: %s\r\n", from))
+	msgBuf.WriteString(fmt.Sprintf("To: %s\r\n", to))
+	msgBuf.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	msgBuf.WriteString("MIME-Version: 1.0\r\n")
+	msgBuf.WriteString(fmt.Sprintf("Content-Type: multipart/mixed; boundary=\"%s\"\r\n\r\n", boundary))
+
+	// Body part
+	msgBuf.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	msgBuf.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
+	msgBuf.WriteString(body)
+	msgBuf.WriteString("\r\n")
+
+	// Attachment part
+	msgBuf.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	msgBuf.WriteString(fmt.Sprintf("Content-Type: %s; name=\"%s\"\r\n", mimeType, filename))
+	msgBuf.WriteString("Content-Transfer-Encoding: base64\r\n")
+	msgBuf.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=\"%s\"\r\n\r\n", filename))
+	msgBuf.WriteString(base64.StdEncoding.EncodeToString(attachmentData))
+	msgBuf.WriteString("\r\n")
+
+	// End boundary
+	msgBuf.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
+
+	msg := &gmail.Message{
+		Raw: base64.URLEncoding.EncodeToString(msgBuf.Bytes()),
 	}
 
 	// Send
