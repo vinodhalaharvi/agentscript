@@ -2266,7 +2266,7 @@ func (r *Runtime) jobSearchCmd(ctx context.Context, query, location, empType, in
 		if err != nil {
 			return "", err
 		}
-		return FormatJobResults(jobs, query), nil
+		return FormatJobResults(jobs), nil
 	})
 }
 
@@ -2310,7 +2310,7 @@ func (r *Runtime) newsHeadlines(ctx context.Context, category, input string) (st
 	}
 	client := NewNewsClient(os.Getenv("GNEWS_API_KEY"), r.searchKey, r.verbose)
 	return CachedGet(r.cache, "headlines", category, CacheTTLNews, func() (string, error) {
-		articles, err := client.Headlines(ctx, category, 10)
+		articles, err := client.TopHeadlines(ctx, category, 10)
 		if err != nil {
 			return "", err
 		}
