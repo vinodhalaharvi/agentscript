@@ -23,8 +23,18 @@ type Runtime struct {
 	github    *GitHubClient
 	claude    *ClaudeClient
 	mcp       *MCPClient
+	hf        *HuggingFaceClient
+	crypto    *CryptoClient
+	reddit    *RedditClient
+	rss       *RSSClient
+	notifier  *NotifyClient
+	cache     *Cache
+	twitter   *TwitterClient
+	whatsapp  *WhatsAppClient
+	emoji     *EmojiStyleClient
 	verbose   bool
 	searchKey string
+	vars      map[string]string
 }
 
 // RuntimeConfig holds runtime configuration
@@ -87,8 +97,18 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 		github:    githubClient,
 		claude:    claudeClient,
 		mcp:       NewMCPClient(),
+		hf:        NewHuggingFaceClient(cfg.Verbose),
+		crypto:    NewCryptoClient(cfg.Verbose),
+		reddit:    NewRedditClient(cfg.Verbose),
+		rss:       NewRSSClient(cfg.Verbose),
+		notifier:  NewNotifyClient(cfg.Verbose),
+		cache:     NewCache(cfg.Verbose),
+		twitter:   NewTwitterClient(cfg.Verbose),
+		whatsapp:  NewWhatsAppClient(cfg.Verbose),
+		emoji:     NewEmojiStyleClient(cfg.Verbose),
 		verbose:   cfg.Verbose,
 		searchKey: cfg.SearchAPIKey,
+		vars:      make(map[string]string),
 	}, nil
 }
 
@@ -278,6 +298,71 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		result, err = r.githubPages(ctx, cmd.Arg, input)
 	case "github_pages_html":
 		result, err = r.githubPagesHTML(ctx, cmd.Arg, input)
+
+	// ==================== Data Commands ====================
+	case "job_search":
+		result, err = r.jobSearchCmd(ctx, cmd.Arg, cmd.Arg2, cmd.Arg3, input)
+	case "weather":
+		result, err = r.weatherFetch(ctx, cmd.Arg, input)
+	case "news":
+		result, err = r.newsFetch(ctx, cmd.Arg, input)
+	case "news_headlines":
+		result, err = r.newsHeadlines(ctx, cmd.Arg, input)
+	case "stock":
+		result, err = r.stockFetch(ctx, cmd.Arg, input)
+	case "crypto":
+		result, err = r.cryptoFetch(ctx, cmd.Arg, input)
+	case "reddit":
+		result, err = r.redditFetch(ctx, cmd.Arg, cmd.Arg2, input)
+	case "rss":
+		result, err = r.rssFetch(ctx, cmd.Arg, input)
+	case "twitter":
+		result, err = r.twitterFetch(ctx, cmd.Arg, input)
+
+	// ==================== Notifications ====================
+	case "notify":
+		result, err = r.notifyCmd(ctx, cmd.Arg, input)
+	case "whatsapp":
+		result, err = r.whatsappSend(ctx, cmd.Arg, input)
+
+	// ==================== Control Flow ====================
+	case "foreach":
+		result, err = r.foreachCmd(ctx, cmd.Arg, input)
+	case "if":
+		result, err = r.ifCmd(ctx, cmd.Arg, input)
+
+	// ==================== Hugging Face ====================
+	case "hf_generate":
+		result, err = r.hfGenerate(ctx, cmd.Arg, cmd.Arg2, input)
+	case "hf_summarize":
+		result, err = r.hfSummarize(ctx, cmd.Arg, input)
+	case "hf_classify":
+		result, err = r.hfClassify(ctx, cmd.Arg, cmd.Arg2, input)
+	case "hf_ner":
+		result, err = r.hfNER(ctx, cmd.Arg, cmd.Arg2, input)
+	case "hf_translate":
+		result, err = r.hfTranslateCmd(ctx, cmd.Arg, cmd.Arg2, cmd.Arg3, input)
+	case "hf_embeddings":
+		result, err = r.hfEmbeddings(ctx, cmd.Arg, cmd.Arg2, input)
+	case "hf_qa":
+		result, err = r.hfQA(ctx, cmd.Arg, cmd.Arg2, input)
+	case "hf_fill_mask":
+		result, err = r.hfFillMask(ctx, cmd.Arg, cmd.Arg2, input)
+	case "hf_zero_shot":
+		result, err = r.hfZeroShot(ctx, cmd.Arg, cmd.Arg2, input)
+	case "hf_image_generate":
+		result, err = r.hfImageGen(ctx, cmd.Arg, cmd.Arg2, input)
+	case "hf_image_classify":
+		result, err = r.hfImageClassify(ctx, cmd.Arg, input)
+	case "hf_speech_to_text":
+		result, err = r.hfSpeechToText(ctx, cmd.Arg, input)
+	case "hf_similarity":
+		result, err = r.hfSimilarityCmd(ctx, cmd.Arg, cmd.Arg2, input)
+
+	// ==================== Emoji Style ====================
+	case "emoji_style":
+		result, err = r.emojiStyleCmd(ctx, cmd.Arg, cmd.Arg2, cmd.Arg3, input)
+
 	default:
 		err = fmt.Errorf("unknown action: %s", cmd.Action)
 	}
@@ -2161,6 +2246,460 @@ func (r *Runtime) githubPagesHTML(ctx context.Context, title string, input strin
 	fmt.Printf("   (Note: May take 1-2 minutes to go live)\n")
 
 	return pagesURL, nil
+}
+
+// ============================================================================
+// Data Command Handlers
+// ============================================================================
+
+func (r *Runtime) jobSearchCmd(ctx context.Context, query, location, empType, input string) (string, error) {
+	if query == "" && input != "" {
+		query = strings.TrimSpace(input)
+	}
+	if query == "" {
+		return "", fmt.Errorf("job_search requires a query")
+	}
+	searcher := NewJobSearcher(r.searchKey, r.verbose)
+	config := JobSearchConfig{Query: query, Location: location, EmploymentType: empType, NumPages: 1}
+	return CachedGet(r.cache, "jobs", query+location, CacheTTLJobs, func() (string, error) {
+		jobs, err := searcher.Search(ctx, config)
+		if err != nil {
+			return "", err
+		}
+		return FormatJobResults(jobs, query), nil
+	})
+}
+
+func (r *Runtime) weatherFetch(ctx context.Context, location, input string) (string, error) {
+	if location == "" {
+		location = strings.TrimSpace(input)
+	}
+	if location == "" {
+		return "", fmt.Errorf("weather requires a location")
+	}
+	client := NewWeatherClient(r.verbose)
+	return CachedGet(r.cache, "weather", location, CacheTTLWeather, func() (string, error) {
+		data, err := client.GetWeather(ctx, location)
+		if err != nil {
+			return "", err
+		}
+		return FormatWeather(data), nil
+	})
+}
+
+func (r *Runtime) newsFetch(ctx context.Context, query, input string) (string, error) {
+	if query == "" {
+		query = strings.TrimSpace(input)
+	}
+	if query == "" {
+		return "", fmt.Errorf("news requires a query")
+	}
+	client := NewNewsClient(os.Getenv("GNEWS_API_KEY"), r.searchKey, r.verbose)
+	return CachedGet(r.cache, "news", query, CacheTTLNews, func() (string, error) {
+		articles, err := client.Search(ctx, query, 10)
+		if err != nil {
+			return "", err
+		}
+		return FormatNewsResults(articles, query), nil
+	})
+}
+
+func (r *Runtime) newsHeadlines(ctx context.Context, category, input string) (string, error) {
+	if category == "" {
+		category = "general"
+	}
+	client := NewNewsClient(os.Getenv("GNEWS_API_KEY"), r.searchKey, r.verbose)
+	return CachedGet(r.cache, "headlines", category, CacheTTLNews, func() (string, error) {
+		articles, err := client.Headlines(ctx, category, 10)
+		if err != nil {
+			return "", err
+		}
+		return FormatNewsResults(articles, category+" headlines"), nil
+	})
+}
+
+func (r *Runtime) stockFetch(ctx context.Context, symbols, input string) (string, error) {
+	if symbols == "" {
+		symbols = strings.TrimSpace(input)
+	}
+	if symbols == "" {
+		return "", fmt.Errorf("stock requires symbol(s)")
+	}
+	client := NewStockClient(os.Getenv("FINNHUB_API_KEY"), r.searchKey, r.verbose)
+	return CachedGet(r.cache, "stock", symbols, CacheTTLStock, func() (string, error) {
+		parsed := ParseStockSymbols(symbols)
+		var quotes []StockQuote
+		for _, sym := range parsed {
+			q, err := client.GetQuote(ctx, sym)
+			if err != nil {
+				return "", err
+			}
+			quotes = append(quotes, *q)
+		}
+		return FormatStockQuotes(quotes), nil
+	})
+}
+
+func (r *Runtime) cryptoFetch(ctx context.Context, arg, input string) (string, error) {
+	query := arg
+	if query == "" {
+		query = strings.TrimSpace(input)
+	}
+	if query == "" {
+		query = "BTC,ETH,SOL"
+	}
+	return CachedGet(r.cache, "crypto", query, CacheTTLCrypto, func() (string, error) {
+		symbols := ParseCryptoSymbols(query)
+		if symbols == nil {
+			n := 10
+			fmt.Sscanf(strings.ToLower(query), "top %d", &n)
+			prices, err := r.crypto.GetTopN(ctx, n)
+			if err != nil {
+				return "", err
+			}
+			return FormatCryptoPrices(prices), nil
+		}
+		prices, err := r.crypto.GetPrices(ctx, symbols)
+		if err != nil {
+			return "", err
+		}
+		return FormatCryptoPrices(prices), nil
+	})
+}
+
+func (r *Runtime) redditFetch(ctx context.Context, arg, arg2, input string) (string, error) {
+	query := arg
+	if query == "" {
+		query = strings.TrimSpace(input)
+	}
+	if query == "" {
+		return "", fmt.Errorf("reddit requires a subreddit or search query")
+	}
+	args := []string{query}
+	if arg2 != "" {
+		args = append(args, arg2)
+	}
+	isSub, q, sort := ParseRedditArgs(args...)
+	return CachedGet(r.cache, "reddit", q+sort, CacheTTLReddit, func() (string, error) {
+		var posts []RedditPost
+		var err error
+		if isSub {
+			posts, err = r.reddit.SearchSubreddit(ctx, q, sort, 10)
+		} else {
+			posts, err = r.reddit.SearchReddit(ctx, q, sort, 10)
+		}
+		if err != nil {
+			return "", err
+		}
+		return FormatRedditPosts(posts, q), nil
+	})
+}
+
+func (r *Runtime) rssFetch(ctx context.Context, feedURL, input string) (string, error) {
+	u := feedURL
+	if u == "" {
+		u = strings.TrimSpace(input)
+	}
+	if u == "" {
+		return ListFeedShortcuts(), nil
+	}
+	return CachedGet(r.cache, "rss", u, CacheTTLRSS, func() (string, error) {
+		items, title, err := r.rss.FetchFeed(ctx, u, 10)
+		if err != nil {
+			return "", err
+		}
+		return FormatRSSItems(items, title), nil
+	})
+}
+
+func (r *Runtime) twitterFetch(ctx context.Context, query, input string) (string, error) {
+	if query == "" {
+		query = strings.TrimSpace(input)
+	}
+	if query == "" {
+		return "", fmt.Errorf("twitter requires a search query")
+	}
+	tweets, err := r.twitter.SearchRecent(ctx, query, 10)
+	if err != nil {
+		return "", err
+	}
+	return FormatTweets(tweets, query), nil
+}
+
+// ============================================================================
+// Notification Handlers
+// ============================================================================
+
+func (r *Runtime) notifyCmd(ctx context.Context, target, input string) (string, error) {
+	if input == "" {
+		return "", fmt.Errorf("notify needs piped content")
+	}
+	return r.notifier.Send(ctx, input, target)
+}
+
+func (r *Runtime) whatsappSend(ctx context.Context, to, input string) (string, error) {
+	if input == "" {
+		return "", fmt.Errorf("whatsapp needs piped content")
+	}
+	return r.whatsapp.Send(ctx, to, input)
+}
+
+// ============================================================================
+// Control Flow Handlers
+// ============================================================================
+
+func (r *Runtime) foreachCmd(ctx context.Context, separator, input string) (string, error) {
+	if input == "" {
+		return "", fmt.Errorf("foreach needs piped input")
+	}
+	config := ParseForEachArgs(separator)
+	items := ParseLoopItems(input, config.Separator)
+	results, err := ExecuteForEach(ctx, items, config, r.verbose,
+		func(ctx context.Context, item string, index int) (string, error) {
+			return item, nil
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+	return FormatForEachResults(results), nil
+}
+
+func (r *Runtime) ifCmd(ctx context.Context, condition, input string) (string, error) {
+	result, err := EvaluateConditionString(condition, input, r.vars)
+	if err != nil {
+		return "", fmt.Errorf("if condition error: %w", err)
+	}
+	r.log("IF %q -> %v", condition, result)
+	if result {
+		return input, nil
+	}
+	return "", nil
+}
+
+// ============================================================================
+// Hugging Face Handlers
+// ============================================================================
+
+func (r *Runtime) hfGenerate(ctx context.Context, prompt, model, input string) (string, error) {
+	if prompt == "" {
+		prompt = input
+	}
+	return r.hf.TextGeneration(ctx, prompt, model, 500)
+}
+
+func (r *Runtime) hfSummarize(ctx context.Context, model, input string) (string, error) {
+	text := input
+	if text == "" {
+		text = model
+		model = ""
+	}
+	return r.hf.Summarize(ctx, text, model)
+}
+
+func (r *Runtime) hfClassify(ctx context.Context, text, model, input string) (string, error) {
+	if text == "" {
+		text = input
+	}
+	results, err := r.hf.Classify(ctx, text, model)
+	if err != nil {
+		return "", err
+	}
+	return FormatClassification(results, text), nil
+}
+
+func (r *Runtime) hfNER(ctx context.Context, text, model, input string) (string, error) {
+	if text == "" {
+		text = input
+	}
+	results, err := r.hf.NER(ctx, text, model)
+	if err != nil {
+		return "", err
+	}
+	return FormatNER(results, text), nil
+}
+
+func (r *Runtime) hfTranslateCmd(ctx context.Context, text, srcLang, tgtLang, input string) (string, error) {
+	if text == "" {
+		text = input
+	}
+	if srcLang == "" {
+		srcLang = "en"
+	}
+	if tgtLang == "" {
+		tgtLang = "fr"
+	}
+	return r.hf.Translate(ctx, text, srcLang, tgtLang)
+}
+
+func (r *Runtime) hfEmbeddings(ctx context.Context, text, model, input string) (string, error) {
+	if text == "" {
+		text = input
+	}
+	texts := strings.Split(text, "\n")
+	embeddings, err := r.hf.Embeddings(ctx, texts, model)
+	if err != nil {
+		return "", err
+	}
+	if len(embeddings) > 0 {
+		return fmt.Sprintf("Generated %d embeddings of dimension %d", len(embeddings), len(embeddings[0])), nil
+	}
+	return "No embeddings generated", nil
+}
+
+func (r *Runtime) hfQA(ctx context.Context, question, contextArg, input string) (string, error) {
+	contextText := contextArg
+	if contextText == "" {
+		contextText = input
+	}
+	result, err := r.hf.QuestionAnswer(ctx, question, contextText, "")
+	if err != nil {
+		return "", err
+	}
+	return FormatQA(result, question), nil
+}
+
+func (r *Runtime) hfFillMask(ctx context.Context, text, model, input string) (string, error) {
+	if text == "" {
+		text = input
+	}
+	results, err := r.hf.FillMask(ctx, text, model)
+	if err != nil {
+		return "", err
+	}
+	return FormatFillMask(results), nil
+}
+
+func (r *Runtime) hfZeroShot(ctx context.Context, text, labelsStr, input string) (string, error) {
+	if text == "" {
+		text = input
+	}
+	labels := []string{"positive", "negative", "neutral"}
+	if labelsStr != "" {
+		labels = strings.Split(labelsStr, ",")
+		for i := range labels {
+			labels[i] = strings.TrimSpace(labels[i])
+		}
+	}
+	result, err := r.hf.ZeroShotClassify(ctx, text, labels, "")
+	if err != nil {
+		return "", err
+	}
+	return FormatZeroShot(result), nil
+}
+
+func (r *Runtime) hfImageGen(ctx context.Context, prompt, model, input string) (string, error) {
+	if prompt == "" {
+		prompt = input
+	}
+	imageBytes, err := r.hf.TextToImage(ctx, prompt, model)
+	if err != nil {
+		return "", err
+	}
+	filename, err := SaveImage(imageBytes, "")
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Image generated: %s (%d bytes)\nPrompt: %s", filename, len(imageBytes), prompt), nil
+}
+
+func (r *Runtime) hfImageClassify(ctx context.Context, imagePath, input string) (string, error) {
+	if imagePath == "" {
+		imagePath = strings.TrimSpace(input)
+	}
+	data, err := os.ReadFile(imagePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read image %s: %w", imagePath, err)
+	}
+	body, err := r.hf.callInferenceRaw(ctx, resolveModel("image_classify", ""), data, "image/jpeg")
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+func (r *Runtime) hfSpeechToText(ctx context.Context, audioPath, input string) (string, error) {
+	if audioPath == "" {
+		audioPath = strings.TrimSpace(input)
+	}
+	data, err := os.ReadFile(audioPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read audio %s: %w", audioPath, err)
+	}
+	body, err := r.hf.callInferenceRaw(ctx, resolveModel("asr", ""), data, "audio/flac")
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+func (r *Runtime) hfSimilarityCmd(ctx context.Context, source, sentencesStr, input string) (string, error) {
+	if source == "" {
+		source = input
+	}
+	var sentences []string
+	if sentencesStr != "" {
+		sentences = strings.Split(sentencesStr, ",")
+		for i := range sentences {
+			sentences[i] = strings.TrimSpace(sentences[i])
+		}
+	}
+	scores, err := r.hf.SentenceSimilarity(ctx, source, sentences, "")
+	if err != nil {
+		return "", err
+	}
+	return FormatSimilarity(source, sentences, scores), nil
+}
+
+// ============================================================================
+// Emoji Style Handler
+// ============================================================================
+
+func (r *Runtime) emojiStyleCmd(ctx context.Context, emojisArg, styleArg, engineArg, input string) (string, error) {
+	// Auto-detect: arg1 might be emojis or style
+	emojis := emojisArg
+	style := styleArg
+	engine := engineArg
+
+	// If emojis arg looks like a style (no emoji chars), swap
+	if emojis != "" && !isEmojiInput(emojis) && style == "" {
+		// Check if input has emojis instead
+		if input != "" && (isEmojiInput(input) || strings.Contains(input, ".png") || strings.Contains(input, ".jpg")) {
+			style = emojis
+			emojis = input
+			input = ""
+		}
+	}
+
+	// If no emojis arg, use input
+	if emojis == "" {
+		emojis = strings.TrimSpace(input)
+	}
+
+	if emojis == "" {
+		return "", fmt.Errorf("emoji_style requires emojis or image paths. Usage: emoji_style \"😀😎🔥\" \"wearing suits\" \"hf\"")
+	}
+	if style == "" {
+		return "", fmt.Errorf("emoji_style requires a style description. Usage: emoji_style \"😀😎🔥\" \"wearing suits with red ties\"")
+	}
+
+	// Parse sources
+	sources, err := DetectEmojiSources(emojis)
+	if err != nil {
+		return "", err
+	}
+
+	// Build config
+	config := ParseEmojiStyleArgs(emojis, style, engine)
+	config.OutputDir = fmt.Sprintf("stickers_%s", sanitizeName(style)[:min(20, len(sanitizeName(style)))])
+
+	// Generate sticker pack
+	results, err := r.emoji.CreateStickerPack(ctx, sources, config)
+	if err != nil {
+		return "", err
+	}
+
+	return FormatEmojiResults(results, config), nil
 }
 
 // log prints verbose output if enabled
