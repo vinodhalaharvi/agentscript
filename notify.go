@@ -135,6 +135,7 @@ func (nc *NotifyClient) sendSlack(ctx context.Context, message string) error {
 		message = message[:3000] + "\n\n... (truncated)"
 	}
 
+	// Try rich blocks first, fall back to plain text
 	blocks := formatSlackBlocks(message)
 
 	payload := map[string]any{
@@ -142,7 +143,16 @@ func (nc *NotifyClient) sendSlack(ctx context.Context, message string) error {
 		"blocks": blocks,
 	}
 
-	return nc.postJSON(ctx, nc.slackURL, payload)
+	err := nc.postJSON(ctx, nc.slackURL, payload)
+	if err != nil && strings.Contains(err.Error(), "invalid_blocks") {
+		// Blocks failed — retry with plain text only
+		nc.log("Blocks failed, retrying with plain text")
+		plainPayload := map[string]any{
+			"text": message,
+		}
+		return nc.postJSON(ctx, nc.slackURL, plainPayload)
+	}
+	return err
 }
 
 // sendDiscord sends a message via Discord webhook

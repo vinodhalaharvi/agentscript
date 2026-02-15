@@ -13,4 +13,4 @@ parallel {
 -> ask "create an executive summary of AI trends with visual content description"
 -> save "ai_report.md"
 -> doc_create "AI Trends Report 2026"
--> email "vinod.halaharvi@gmail.com"
+-> email "vinodhalaharvi@gmail.com"

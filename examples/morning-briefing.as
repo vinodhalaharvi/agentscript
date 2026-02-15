@@ -1,5 +1,5 @@
 parallel {
-  weather "San Francisco"
+  weather "Ashburn"
   crypto "BTC,ETH,SOL"
   rss "hn"
   reddit "r/golang"

@@ -6,4 +6,4 @@ parallel {
 -> images_to_video "dawn.png sunset.png"
 -> save "butterflies.mp4"
 -> drive_save "butterflies"
--> email "vinod.halaharvi@gmail.com"
+-> email "vinodhalaharvi@gmail.com"
