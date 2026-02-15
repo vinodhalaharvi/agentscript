@@ -39,7 +39,7 @@ const (
 	// Inference Providers router — routes to best available provider
 	hfRouterURL = "https://router.huggingface.co"
 	// Legacy direct inference endpoint (fallback)
-	hfInferenceURL = "https://api-inference.huggingface.co/models"
+	hfInferenceURL = "https://router.huggingface.co/hf-inference/models"
 )
 
 // HuggingFaceClient handles all Hugging Face API interactions
