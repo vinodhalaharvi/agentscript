@@ -135,17 +135,11 @@ func (nc *NotifyClient) sendSlack(ctx context.Context, message string) error {
 		message = message[:3000] + "\n\n... (truncated)"
 	}
 
+	blocks := formatSlackBlocks(message)
+
 	payload := map[string]any{
-		"text": message,
-		"blocks": []map[string]any{
-			{
-				"type": "section",
-				"text": map[string]string{
-					"type": "mrkdwn",
-					"text": message,
-				},
-			},
-		},
+		"text":   message, // fallback for notifications
+		"blocks": blocks,
 	}
 
 	return nc.postJSON(ctx, nc.slackURL, payload)
@@ -218,4 +212,145 @@ func (nc *NotifyClient) postJSON(ctx context.Context, url string, payload map[st
 	}
 
 	return nil
+}
+
+// formatSlackBlocks converts markdown-ish text into rich Slack Block Kit blocks
+func formatSlackBlocks(message string) []map[string]any {
+	var blocks []map[string]any
+
+	lines := strings.Split(message, "\n")
+	var currentSection strings.Builder
+	isFirst := true
+
+	flushSection := func() {
+		text := strings.TrimSpace(currentSection.String())
+		if text == "" {
+			return
+		}
+		// Convert markdown bold **text** to Slack bold *text*
+		text = convertMarkdownToSlack(text)
+
+		// Slack section text max is 3000 chars
+		if len(text) > 3000 {
+			text = text[:3000]
+		}
+		blocks = append(blocks, map[string]any{
+			"type": "section",
+			"text": map[string]string{
+				"type": "mrkdwn",
+				"text": text,
+			},
+		})
+		currentSection.Reset()
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Headers → Slack header block or bold divider
+		if strings.HasPrefix(trimmed, "# ") {
+			flushSection()
+			title := strings.TrimPrefix(trimmed, "# ")
+			title = strings.TrimPrefix(title, "## ")
+			if isFirst {
+				blocks = append(blocks, map[string]any{
+					"type": "header",
+					"text": map[string]string{
+						"type":  "plain_text",
+						"text":  title,
+						"emoji": "true",
+					},
+				})
+				isFirst = false
+			} else {
+				blocks = append(blocks, map[string]any{
+					"type": "divider",
+				})
+				currentSection.WriteString("*" + title + "*\n")
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "## ") {
+			flushSection()
+			title := strings.TrimPrefix(trimmed, "## ")
+			blocks = append(blocks, map[string]any{
+				"type": "divider",
+			})
+			currentSection.WriteString("*" + title + "*\n")
+			continue
+		}
+
+		// Horizontal rules → dividers
+		if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+			flushSection()
+			blocks = append(blocks, map[string]any{
+				"type": "divider",
+			})
+			continue
+		}
+
+		// Table rows → format as code block for alignment
+		if strings.Contains(trimmed, "|") && strings.Count(trimmed, "|") >= 2 {
+			// Skip markdown table separator rows
+			if strings.Trim(trimmed, "|-: ") == "" {
+				continue
+			}
+			currentSection.WriteString(trimmed + "\n")
+			continue
+		}
+
+		// Empty lines between paragraphs
+		if trimmed == "" {
+			if currentSection.Len() > 0 {
+				currentSection.WriteString("\n")
+			}
+			continue
+		}
+
+		isFirst = false
+		currentSection.WriteString(trimmed + "\n")
+	}
+
+	flushSection()
+
+	// Add timestamp footer
+	blocks = append(blocks, map[string]any{
+		"type": "context",
+		"elements": []map[string]string{
+			{
+				"type": "mrkdwn",
+				"text": "📡 _Sent by AgentScript_ • " + time.Now().Format("Jan 2, 3:04 PM"),
+			},
+		},
+	})
+
+	return blocks
+}
+
+// convertMarkdownToSlack converts common markdown to Slack mrkdwn
+func convertMarkdownToSlack(text string) string {
+	// **bold** → *bold*
+	for strings.Contains(text, "**") {
+		start := strings.Index(text, "**")
+		rest := text[start+2:]
+		end := strings.Index(rest, "**")
+		if end == -1 {
+			break
+		}
+		text = text[:start] + "*" + rest[:end] + "*" + rest[end+2:]
+	}
+
+	// Convert bullet points: - item or * item → • item
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") {
+			lines[i] = "  • " + strings.TrimPrefix(trimmed, "- ")
+		} else if strings.HasPrefix(trimmed, "* ") && !strings.HasPrefix(trimmed, "**") {
+			lines[i] = "  • " + strings.TrimPrefix(trimmed, "* ")
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
