@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          check-latest: true
+
+      - name: Tidy check
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Vet
+        # -structtag=false suppresses go vet warnings about participle
+        # grammar struct tags. Participle reads its struct tags itself
+        # rather than via reflect.StructTag.Get, so vet's complaint that
+        # the tags aren't reflect-compatible is structurally unavoidable.
+        # Every other vet check stays enabled.
+        run: go vet -structtag=false ./...
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "gofmt found unformatted files:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: Staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: "latest"
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Build
+        run: go build ./...
