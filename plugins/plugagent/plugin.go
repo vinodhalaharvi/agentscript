@@ -213,10 +213,10 @@ func (p *Plugin) buildContext() (*contextResult, error) {
 			continue
 		}
 
-		sb.WriteString(fmt.Sprintf("\n\n// ============================================================\n"))
+		sb.WriteString("\n\n// ============================================================\n")
 		sb.WriteString(fmt.Sprintf("// FILE: %s\n", cf.path))
 		sb.WriteString(fmt.Sprintf("// PURPOSE: %s\n", cf.purpose))
-		sb.WriteString(fmt.Sprintf("// ============================================================\n"))
+		sb.WriteString("// ============================================================\n")
 		sb.WriteString(string(data))
 		fileCount++
 	}

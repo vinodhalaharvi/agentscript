@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vinodhalaharvi/agentscript/plugins/mcp"
 	"github.com/vinodhalaharvi/agentscript/pkg/plugin"
+	"github.com/vinodhalaharvi/agentscript/plugins/mcp"
 )
 
 // Reasoner is the AI seam — Claude or Gemini deciding which tool to call

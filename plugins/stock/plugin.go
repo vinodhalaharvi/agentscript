@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vinodhalaharvi/agentscript/pkg/cache"
 	"github.com/vinodhalaharvi/agentscript/pkg/plugin"
+	"github.com/vinodhalaharvi/agentscript/plugins/cache"
 )
 
 // Plugin wraps StockClient as a Plugin.

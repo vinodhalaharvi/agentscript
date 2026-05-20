@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vinodhalaharvi/agentscript/pkg/cache"
 	"github.com/vinodhalaharvi/agentscript/pkg/plugin"
+	"github.com/vinodhalaharvi/agentscript/plugins/cache"
 )
 
 // Plugin wraps RedditClient as a Plugin.

@@ -85,7 +85,7 @@ func (rc *RedditClient) SearchSubreddit(ctx context.Context, subreddit string, s
 
 	resp, err := rc.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Reddit request failed: %w", err)
+		return nil, fmt.Errorf("reddit request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -95,11 +95,11 @@ func (rc *RedditClient) SearchSubreddit(ctx context.Context, subreddit string, s
 	}
 
 	if resp.StatusCode == 429 {
-		return nil, fmt.Errorf("Reddit rate limited. Wait 60 seconds and retry")
+		return nil, fmt.Errorf("reddit rate limited. Wait 60 seconds and retry")
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Reddit error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("reddit error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	return rc.parseListing(body)
@@ -142,7 +142,7 @@ func (rc *RedditClient) SearchReddit(ctx context.Context, query string, sort str
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Reddit search error (status %d)", resp.StatusCode)
+		return nil, fmt.Errorf("reddit search error (status %d)", resp.StatusCode)
 	}
 
 	return rc.parseListing(body)

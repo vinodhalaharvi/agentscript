@@ -11,7 +11,8 @@ import (
 	"github.com/vinodhalaharvi/agentscript/pkg/plugin"
 )
 
-// GeminiReviewer is a functional field seam — same pattern as ReactGenerator.
+// GeminiReviewer is a functional field seam — injected from the runtime
+// to give the plugin a Gemini-backed reviewer without a hard dependency.
 // Gemini's GenerateContent doesn't match Reviewer directly because it's on
 // a concrete type, so we inject it as a function value from registry.go.
 type GeminiReviewer func(ctx context.Context, prompt string) (string, error)

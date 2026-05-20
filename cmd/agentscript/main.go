@@ -194,7 +194,7 @@ func runREPL(ctx context.Context, rt *agentscript.Runtime, trans *agentscript.Tr
 }
 
 func printUsage() {
-	fmt.Println(`AgentScript - A DSL for commanding AI agents
+	fmt.Print(`AgentScript - A DSL for commanding AI agents
 
 Usage:
   agentscript [flags] [script]
@@ -242,7 +242,7 @@ Examples:
 }
 
 func printHelp() {
-	fmt.Println(`
+	fmt.Print(`
 REPL Commands:
   :help, :h   Show this help
   :mode, :m   Toggle natural language / DSL mode  
@@ -278,4 +278,3 @@ func coalesce(vals ...string) string {
 	}
 	return ""
 }
-

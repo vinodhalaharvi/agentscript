@@ -79,7 +79,7 @@ func (wc *WhatsAppClient) Send(ctx context.Context, to string, message string) (
 
 	resp, err := wc.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Twilio request failed: %w", err)
+		return "", fmt.Errorf("twilio request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -94,7 +94,7 @@ func (wc *WhatsAppClient) Send(ctx context.Context, to string, message string) (
 			Code    int    `json:"code"`
 		}
 		json.Unmarshal(body, &twilioErr)
-		return "", fmt.Errorf("Twilio error (status %d, code %d): %s",
+		return "", fmt.Errorf("twilio error (status %d, code %d): %s",
 			resp.StatusCode, twilioErr.Code, twilioErr.Message)
 	}
 

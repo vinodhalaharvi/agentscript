@@ -937,9 +937,7 @@ func parseExtraction(response string) (*extraction, error) {
 	// Strip markdown fences
 	if idx := strings.Index(response, "```"); idx >= 0 {
 		response = response[idx+3:]
-		if strings.HasPrefix(response, "json") {
-			response = response[4:]
-		}
+		response = strings.TrimPrefix(response, "json")
 		if end := strings.Index(response, "```"); end >= 0 {
 			response = response[:end]
 		}
