@@ -137,7 +137,7 @@ func (sc *StockClient) quoteFinnhub(ctx context.Context, symbol string) (*StockQ
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Finnhub error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("finnhub error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	var raw struct {

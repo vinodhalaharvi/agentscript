@@ -96,7 +96,7 @@ func genStyles(td *TableDef) string {
 .navbar-title { font-size: 18px; font-weight: 700; color: var(--text); }
 .navbar-meta { font-size: 12px; color: var(--text-muted); }
 .navbar-status { display: flex; align-items: center; gap: 8px; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%%; background: var(--green); }
 .status-dot.connecting { background: var(--yellow); animation: pulse 1s infinite; }
 .status-dot.error { background: var(--red); }
 
@@ -291,7 +291,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   width: 20px; height: 20px;
   border: 2px solid var(--border);
   border-top-color: var(--accent);
-  border-radius: 50%;
+  border-radius: 50%%;
   animation: spin 0.7s linear infinite;
 }
 

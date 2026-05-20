@@ -82,7 +82,7 @@ func (m *MCPClient) Connect(ctx context.Context, name, command string) error {
 
 	// Create command
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	cmd.Env = append(os.Environ()) // Inherit environment for tokens
+	cmd.Env = os.Environ() // Inherit environment for tokens
 
 	// Setup pipes
 	stdin, err := cmd.StdinPipe()

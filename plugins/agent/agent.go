@@ -5,7 +5,7 @@
 //
 // Seams in play:
 //   - Claude client  → reused from pkg/claude (zero new infrastructure)
-//   - DSL execution  → Executor functional field (same pattern as ReactGenerator)
+//   - DSL execution  → Executor functional field
 //   - Confirmation   → stdin prompt — human always in the loop
 package agent
 
@@ -21,9 +21,8 @@ import (
 )
 
 // Executor is the seam between the agent plugin and the runtime.
-// pkg/agent cannot import internal/agentscript (Go's internal package rule).
-// So the runtime injects itself as this function type from registry.go —
-// the exact same pattern as ReactGenerator in pkg/github/plugin.go.
+// plugins/agent cannot import internal/agentscript (Go's internal package rule).
+// So the runtime injects itself as this function type from registry.go.
 type Executor func(ctx context.Context, dsl string) (string, error)
 
 // Plugin is the agent plugin.

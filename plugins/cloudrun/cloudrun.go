@@ -732,7 +732,7 @@ func (c *Client) quickPermissionCheck(ctx context.Context) error {
     export GCP_SERVICE_ACCOUNT="agentscript@your-project.iam.gserviceaccount.com"
     export GCP_REGION="us-central1"  # optional, defaults to us-central1
 
-  Then run gcp_check to validate all prerequisites.`, strings.Join(missing, ", "))
+  Then run gcp_check to validate all prerequisites`, strings.Join(missing, ", "))
 	}
 	return nil
 }
@@ -763,27 +763,27 @@ func (c *Client) wrapDeployError(step string, err error) error {
 // wrapSchedulerError wraps scheduler API errors with actionable messages.
 func (c *Client) wrapSchedulerError(statusCode int, body string) error {
 	if statusCode == 403 {
-		return fmt.Errorf(`Cloud Scheduler permission denied
+		return fmt.Errorf(`permission denied for Cloud Scheduler
 
   Grant the required role:
     gcloud projects add-iam-policy-binding %s \
       --member="serviceAccount:%s" \
       --role="roles/cloudscheduler.admin"`, c.project, c.serviceAccount)
 	}
-	return fmt.Errorf("Cloud Scheduler API error %d: %s", statusCode, body)
+	return fmt.Errorf("cloud Scheduler API error %d: %s", statusCode, body)
 }
 
 // wrapJobError wraps Cloud Run Job API errors with actionable messages.
 func (c *Client) wrapJobError(statusCode int, body string) error {
 	if statusCode == 403 {
-		return fmt.Errorf(`Cloud Run permission denied
+		return fmt.Errorf(`permission denied for Cloud Run
 
   Grant the required role:
     gcloud projects add-iam-policy-binding %s \
       --member="serviceAccount:%s" \
       --role="roles/run.admin"`, c.project, c.serviceAccount)
 	}
-	return fmt.Errorf("Cloud Run API error %d: %s", statusCode, body)
+	return fmt.Errorf("cloud Run API error %d: %s", statusCode, body)
 }
 
 // humanReadableCron converts a cron expression to a human-readable string.

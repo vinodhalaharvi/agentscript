@@ -100,7 +100,7 @@ func (tc *TwitterClient) SearchRecent(ctx context.Context, query string, maxResu
 
 	resp, err := tc.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Twitter request failed: %w", err)
+		return nil, fmt.Errorf("twitter request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -110,11 +110,11 @@ func (tc *TwitterClient) SearchRecent(ctx context.Context, query string, maxResu
 	}
 
 	if resp.StatusCode == 429 {
-		return nil, fmt.Errorf("Twitter rate limited. Free tier: 10 requests/min. Wait and retry")
+		return nil, fmt.Errorf("twitter rate limited. Free tier: 10 requests/min. Wait and retry")
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Twitter error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("twitter error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
@@ -178,7 +178,7 @@ func (tc *TwitterClient) SearchRecent(ctx context.Context, query string, maxResu
 // Post creates a new tweet
 func (tc *TwitterClient) Post(ctx context.Context, text string) (*Tweet, error) {
 	if !tc.CanPost() {
-		return nil, fmt.Errorf("Twitter posting requires: TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET")
+		return nil, fmt.Errorf("twitter posting requires: TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET")
 	}
 
 	// Twitter limit: 280 characters
@@ -219,7 +219,7 @@ func (tc *TwitterClient) Post(ctx context.Context, text string) (*Tweet, error) 
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("Twitter post error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("twitter post error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {

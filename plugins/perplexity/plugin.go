@@ -17,11 +17,10 @@ import (
 //	perplexity_recent "query" "week"      — time-filtered search (day/week/month)
 //	perplexity_domain "query" "domain.com" — domain-restricted search
 //
-// The ReactGenerator seam from github/plugin.go shows how a functional field
-// makes a plugin configurable without changing its interface.
-// The perplexity plugin demonstrates the same principle with SearchOptions —
-// each command variant is just a CommandFunc closure that captures different
-// SearchOptions. No subclassing, no strategy pattern, just functions.
+// The perplexity plugin demonstrates the functional-field pattern with
+// SearchOptions — each command variant is just a CommandFunc closure that
+// captures different SearchOptions. No subclassing, no strategy pattern,
+// just functions.
 type Plugin struct {
 	client *Client
 }

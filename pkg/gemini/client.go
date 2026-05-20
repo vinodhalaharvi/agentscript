@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -742,40 +741,4 @@ func (c *GeminiClient) TextToSpeech(ctx context.Context, text string, voice stri
 	}
 
 	return outputPath, nil
-}
-
-// writePCMToWav writes raw PCM data to a WAV file with proper header
-func writePCMToWav(filename string, pcmData []byte, sampleRate, numChannels, bitsPerSample int) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	// Calculate sizes
-	byteRate := sampleRate * numChannels * bitsPerSample / 8
-	blockAlign := numChannels * bitsPerSample / 8
-	dataSize := len(pcmData)
-
-	// RIFF header
-	file.Write([]byte("RIFF"))
-	binary.Write(file, binary.LittleEndian, uint32(36+dataSize)) // file size - 8
-	file.Write([]byte("WAVE"))
-
-	// fmt subchunk
-	file.Write([]byte("fmt "))
-	binary.Write(file, binary.LittleEndian, uint32(16))            // subchunk size
-	binary.Write(file, binary.LittleEndian, uint16(1))             // audio format (1 = PCM)
-	binary.Write(file, binary.LittleEndian, uint16(numChannels))   // num channels
-	binary.Write(file, binary.LittleEndian, uint32(sampleRate))    // sample rate
-	binary.Write(file, binary.LittleEndian, uint32(byteRate))      // byte rate
-	binary.Write(file, binary.LittleEndian, uint16(blockAlign))    // block align
-	binary.Write(file, binary.LittleEndian, uint16(bitsPerSample)) // bits per sample
-
-	// data subchunk
-	file.Write([]byte("data"))
-	binary.Write(file, binary.LittleEndian, uint32(dataSize))
-	file.Write(pcmData)
-
-	return nil
 }

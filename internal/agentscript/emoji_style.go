@@ -415,7 +415,7 @@ func (e *EmojiStyleClient) generateWithGemini(ctx context.Context, prompt string
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Gemini image request failed: %w", err)
+		return nil, fmt.Errorf("gemini image request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -440,7 +440,7 @@ func (e *EmojiStyleClient) generateWithGemini(ctx context.Context, prompt string
 	}
 
 	if len(result.Predictions) == 0 {
-		return nil, fmt.Errorf("Gemini returned no images")
+		return nil, fmt.Errorf("gemini returned no images")
 	}
 
 	imageBytes, err := base64.StdEncoding.DecodeString(result.Predictions[0].BytesBase64Encoded)
@@ -484,7 +484,7 @@ func (e *EmojiStyleClient) generateWithGeminiFlash(ctx context.Context, prompt s
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Gemini Flash request failed: %w", err)
+		return nil, fmt.Errorf("gemini Flash request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -494,7 +494,7 @@ func (e *EmojiStyleClient) generateWithGeminiFlash(ctx context.Context, prompt s
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Gemini Flash error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("gemini Flash error (status %d): %s", resp.StatusCode, string(body))
 	}
 
 	// Parse the response looking for inline image data
@@ -527,7 +527,7 @@ func (e *EmojiStyleClient) generateWithGeminiFlash(ctx context.Context, prompt s
 		}
 	}
 
-	return nil, fmt.Errorf("Gemini Flash returned no image data")
+	return nil, fmt.Errorf("gemini Flash returned no image data")
 }
 
 // generateWithHF uses Hugging Face Inference API with Stable Diffusion

@@ -36,8 +36,6 @@ import (
 // ============================================================================
 
 const (
-	// Inference Providers router — routes to best available provider
-	hfRouterURL = "https://router.huggingface.co"
 	// Legacy direct inference endpoint (fallback)
 	hfInferenceURL = "https://router.huggingface.co/hf-inference/models"
 )
@@ -126,7 +124,7 @@ func ResolveModel(task string, userModel string) string {
 
 func (hf *HuggingFaceClient) callInference(ctx context.Context, model string, payload any) ([]byte, error) {
 	if !hf.IsConfigured() {
-		return nil, fmt.Errorf("Hugging Face token not set. Set HF_TOKEN env var (get one at https://huggingface.co/settings/tokens)")
+		return nil, fmt.Errorf("hugging Face token not set. Set HF_TOKEN env var (get one at https://huggingface.co/settings/tokens)")
 	}
 
 	jsonBody, err := json.Marshal(payload)

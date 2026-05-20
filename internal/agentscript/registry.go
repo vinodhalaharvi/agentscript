@@ -9,13 +9,12 @@ package agentscript
 // This file is the composition root for the plugin system.
 
 import (
-	"context"
-	"fmt"
 	"os"
-	"strings"
 
+	"github.com/vinodhalaharvi/agentscript/pkg/openai"
+	"github.com/vinodhalaharvi/agentscript/pkg/plugin"
 	"github.com/vinodhalaharvi/agentscript/plugins/agent"
-	"github.com/vinodhalaharvi/agentscript/pkg/cache"
+	"github.com/vinodhalaharvi/agentscript/plugins/cache"
 	"github.com/vinodhalaharvi/agentscript/plugins/cloudrun"
 	agcrypto "github.com/vinodhalaharvi/agentscript/plugins/crypto"
 	"github.com/vinodhalaharvi/agentscript/plugins/datatable"
@@ -31,11 +30,9 @@ import (
 	"github.com/vinodhalaharvi/agentscript/plugins/news"
 	"github.com/vinodhalaharvi/agentscript/plugins/notify"
 	"github.com/vinodhalaharvi/agentscript/plugins/ollama"
-	"github.com/vinodhalaharvi/agentscript/pkg/openai"
 	"github.com/vinodhalaharvi/agentscript/plugins/pdffill"
 	"github.com/vinodhalaharvi/agentscript/plugins/perplexity"
 	"github.com/vinodhalaharvi/agentscript/plugins/plugagent"
-	"github.com/vinodhalaharvi/agentscript/pkg/plugin"
 	"github.com/vinodhalaharvi/agentscript/plugins/rag"
 	"github.com/vinodhalaharvi/agentscript/plugins/reddit"
 	"github.com/vinodhalaharvi/agentscript/plugins/review"
@@ -91,7 +88,8 @@ func (r *Runtime) buildRegistry(c *cache.Cache) *plugin.Registry {
 	}
 
 	// --- Agent — natural language to DSL via Claude
-	// r.RunDSL is the Executor seam — same pattern as ReactGenerator.
+	// r.RunDSL is the Executor seam — a functional field that lets the
+	// agent plugin run DSL strings without knowing about the Runtime.
 	if r.claude != nil {
 		reg.Register(agent.NewPlugin(r.claude, r.RunDSL, r.verbose))
 	}
@@ -165,75 +163,8 @@ func (r *Runtime) buildRegistry(c *cache.Cache) *plugin.Registry {
 		reg.Register(review.NewPlugin(r.claude, geminiReviewer, openaiClient, r.verbose))
 	}
 
-	// --- GitHub — ReactGenerator is the functional field seam.
-	// Claude is preferred; Gemini is the fallback; nil means no AI available.
-	// The github plugin doesn't know which it gets — just that it's a function.
-	var reactGen aggithub.ReactGenerator
-	if r.claude != nil {
-		reactGen = r.claude.GenerateReactSPA
-	} else if r.gemini != nil {
-		reactGen = r.buildGeminiReactGenerator()
-	}
-	reg.Register(aggithub.NewPlugin(r.github, reactGen))
+	// --- GitHub — deploys plain HTML to GitHub Pages.
+	reg.Register(aggithub.NewPlugin(r.github))
 
 	return reg
-}
-
-// buildGeminiReactGenerator adapts the Gemini client into a ReactGenerator.
-// This is the XxxFunc bridge pattern — Gemini's GenerateContent doesn't
-// match ReactGenerator's signature, so we wrap it in a closure.
-func (r *Runtime) buildGeminiReactGenerator() aggithub.ReactGenerator {
-	return func(ctx context.Context, title, content string) (string, error) {
-		prompt := buildReactSPAPrompt(title, content)
-		result, err := r.gemini.GenerateContent(ctx, prompt)
-		if err != nil {
-			return "", err
-		}
-		return cleanHTMLResponse(result), nil
-	}
-}
-
-// buildReactSPAPrompt constructs the prompt for React SPA generation.
-// Extracted here so it can be used by both Gemini and any future generator.
-func buildReactSPAPrompt(title, content string) string {
-	return fmt.Sprintf(`Generate a beautiful, modern React single-page application (SPA) for the following content.
-
-TITLE: %s
-
-CONTENT:
-%s
-
-REQUIREMENTS:
-1. Output ONLY the complete HTML file with embedded React (using babel standalone)
-2. Use React hooks (useState, useEffect)
-3. Modern, dark theme UI with gradients and animations
-4. Responsive design with Tailwind CSS (via CDN)
-5. Include smooth scroll animations
-6. Add a navigation header if content has sections
-7. Use React icons or emojis for visual appeal
-8. Make it visually stunning - this is for a hackathon demo!
-9. Include a footer crediting "Built with AgentScript"
-
-OUTPUT FORMAT:
-Return ONLY the HTML code starting with <!DOCTYPE html> and ending with </html>
-No markdown, no explanation, just the raw HTML/React code.`, title, content)
-}
-
-// cleanHTMLResponse strips markdown code fences from an AI-generated HTML response.
-func cleanHTMLResponse(result string) string {
-	result = strings.TrimSpace(result)
-	result = strings.TrimPrefix(result, "```html")
-	result = strings.TrimPrefix(result, "```")
-	result = strings.TrimSuffix(result, "```")
-	result = strings.TrimSpace(result)
-
-	if !strings.HasPrefix(result, "<!DOCTYPE html>") && !strings.HasPrefix(result, "<html") {
-		if idx := strings.Index(result, "<!DOCTYPE html>"); idx != -1 {
-			return result[idx:]
-		}
-		if idx := strings.Index(result, "<html"); idx != -1 {
-			return result[idx:]
-		}
-	}
-	return result
 }

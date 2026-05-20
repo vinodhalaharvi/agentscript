@@ -754,7 +754,7 @@ func (g *GoogleClient) CreateForm(ctx context.Context, title string, description
 
 	// Add description if provided (separate call)
 	if description != "" {
-		_, err = g.forms.Forms.BatchUpdate(createdForm.FormId, &forms.BatchUpdateFormRequest{
+		_, _ = g.forms.Forms.BatchUpdate(createdForm.FormId, &forms.BatchUpdateFormRequest{
 			Requests: []*forms.Request{{
 				UpdateFormInfo: &forms.UpdateFormInfoRequest{
 					Info: &forms.Info{
