@@ -82,11 +82,11 @@ type parsedScript struct {
 
 // parsedBlock matches: <backend> <mode> ( <pipeline> )
 type parsedBlock struct {
-	Backend string         `@("memory" | "temporal")`
-	Mode    string         `@("static" | "dynamic")`
-	OpenP   struct{}       `"("`
+	Backend string          `@("memory" | "temporal")`
+	Mode    string          `@("static" | "dynamic")`
+	OpenP   struct{}        `"("`
 	Body    *parsedPipeline `@@`
-	CloseP  struct{}       `")"`
+	CloseP  struct{}        `")"`
 }
 
 // parsedPipeline matches: <call> ( ">=>" <call> )*
