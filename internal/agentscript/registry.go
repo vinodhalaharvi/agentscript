@@ -100,9 +100,6 @@ func (r *Runtime) buildRegistry(c *cache.Cache) *plugin.Registry {
 	reg.Register(network.NewPlugin(r.verbose))
 
 	// --- Shell exec — top-level shell primitive for pipelines ---
-	// Separate from converge's internal `exec` prefix inside validate()
-	// blocks; that one is parsed by pkg/intent/parser.go and never reaches
-	// this registry.
 	reg.Register(agexec.NewPlugin(r.verbose))
 
 	// --- PDF Form Fill — AI-powered PDF form filling ---

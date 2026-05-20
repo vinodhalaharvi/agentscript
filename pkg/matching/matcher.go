@@ -15,10 +15,6 @@
 // The matcher returns (bindings, true) on match, (nil, false) on miss.
 // Bindings are returned as map[string]Value; callers can use them to
 // parameterize downstream dispatch.
-//
-// This primitive is used by:
-//   - pkg/coordinate for subscription dispatch and merge-outcome dispatch
-//   - (future) pkg/intent for match-driven converge intents
 package matching
 
 import (
@@ -189,9 +185,7 @@ func matchInto(p Pattern, v Value, b Bindings) bool {
 }
 
 // ValuesEqual compares two Values structurally. Exported wrapper around
-// the internal valuesEqual. Used by pkg/coordinate/blackboard for
-// idempotent-write detection (writes with an unchanged value shouldn't
-// reset the equilibrium clock).
+// the internal valuesEqual.
 func ValuesEqual(a, b Value) bool {
 	return valuesEqual(a, b)
 }
