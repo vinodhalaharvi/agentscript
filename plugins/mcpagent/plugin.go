@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vinodhalaharvi/agentscript/pkg/mcp"
+	"github.com/vinodhalaharvi/agentscript/plugins/mcp"
 	"github.com/vinodhalaharvi/agentscript/pkg/plugin"
 )
 
