@@ -4,12 +4,7 @@
 // success (empty args OK — piped input becomes stdin). Non-zero exit fails
 // the pipeline with stderr as the error message. This is the primitive you
 // want for git clone / go build / go test / buf generate / anything that
-// lives outside a converge block but needs to happen mid-pipeline.
-//
-// Naming: "exec" collides with the line-prefix inside converge validate()
-// blocks, but those are parsed by pkg/intent/parser.go and never reach the
-// main DSL lexer — different codepath, no runtime conflict. Semantically
-// both mean "run a shell command", so the shared name is consistent.
+// needs to happen mid-pipeline.
 package exec
 
 import (

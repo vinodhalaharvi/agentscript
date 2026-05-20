@@ -6,12 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/vinodhalaharvi/agentscript/internal/agentscript"
-	"github.com/vinodhalaharvi/agentscript/pkg/claude"
-	"github.com/vinodhalaharvi/agentscript/pkg/intent"
 )
 
 func main() {
@@ -114,12 +111,6 @@ func executeFile(ctx context.Context, rt *agentscript.Runtime, path string) {
 	}
 
 	content := string(data)
-
-	// Check if this file has intent blocks
-	if hasIntentBlocks(content) {
-		executeIntent(ctx, rt, content)
-		return
-	}
 
 	executeScript(ctx, rt, content)
 }
@@ -288,146 +279,3 @@ func coalesce(vals ...string) string {
 	return ""
 }
 
-// hasIntentBlocks checks if a .as file contains context/intent/validate blocks
-// hasIntentBlocks checks if a .as file is an intent-style file (has
-// top-level context/intent/validate blocks that drive the intent engine),
-// NOT a pipeline file that happens to contain a coordinate or converge
-// block with nested `context (...)` inside.
-//
-// Depth-aware: tracks ( ) nesting so we only look for these keywords at
-// top-level (depth 0). A coordinate block containing `context (...)` as
-// a nested config block does NOT make the enclosing file intent-style.
-//
-// Without this check, intent.ParseFile would greedily consume nested
-// context blocks out of coordinate/converge bodies, leaving the
-// downstream parser with a mangled body missing stability_rounds and
-// max_rounds — silent default fallback, hard-to-diagnose bug.
-func hasIntentBlocks(content string) bool {
-	lines := strings.Split(content, "\n")
-	depth := 0
-	for _, line := range lines {
-		t := strings.TrimSpace(line)
-		if t == "" || strings.HasPrefix(t, "//") {
-			continue
-		}
-		if depth == 0 {
-			if strings.HasPrefix(t, "intent ") || strings.HasPrefix(t, "intent(") ||
-				strings.HasPrefix(t, "validate ") || strings.HasPrefix(t, "validate(") ||
-				strings.HasPrefix(t, "context ") || strings.HasPrefix(t, "context(") {
-				return true
-			}
-		}
-		// Update paren depth from this line's contents.
-		for i := 0; i < len(t); i++ {
-			c := t[i]
-			if c == '(' {
-				depth++
-			} else if c == ')' {
-				depth--
-				if depth < 0 {
-					depth = 0
-				}
-			}
-		}
-	}
-	return false
-}
-
-// executeIntent runs the intent reconciliation loop
-func executeIntent(ctx context.Context, rt *agentscript.Runtime, content string) {
-	cfg, err := intent.ParseFile(content)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Intent parse error: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Build the reasoner function based on config
-	var reasonerFn intent.ReasonerFunc
-	var session *claude.Session
-
-	if cfg.UseSession && cfg.Reasoner == "claude" {
-		session = rt.GetClaudeSession()
-		if session == nil {
-			fmt.Fprintf(os.Stderr, "⛔ FATAL: session claude requested but CLAUDE_API_KEY not set\n")
-			os.Exit(1)
-		}
-		fmt.Printf("✅ Session active: claude\n")
-
-		// Auto-read .agentscript.md from sandbox as system prompt
-		agentscriptMD := filepath.Join(cfg.Sandbox, ".agentscript.md")
-		if data, err := os.ReadFile(agentscriptMD); err == nil {
-			session.SystemPrompt = string(data)
-			fmt.Printf("📌 Loaded .agentscript.md (%d bytes) as system prompt\n", len(data))
-		} else {
-			fmt.Printf("⚠️  No .agentscript.md found at %s (recommended for import rules)\n", agentscriptMD)
-		}
-
-		reasonerFn = func(prompt string) (string, error) {
-			return session.Chat(ctx, prompt)
-		}
-	}
-
-	if reasonerFn == nil {
-		if cfg.UseSession {
-			fmt.Fprintf(os.Stderr, "⛔ FATAL: session requested but could not create session\n")
-			os.Exit(1)
-		}
-		if cfg.Reasoner == "ollama" {
-			if cfg.ReasonerModel != "" {
-				reasonerFn = func(prompt string) (string, error) {
-					return rt.RunDSL(ctx, fmt.Sprintf("ollama %q %q", prompt, cfg.ReasonerModel))
-				}
-			} else {
-				reasonerFn = func(prompt string) (string, error) {
-					return rt.RunDSL(ctx, fmt.Sprintf("ollama %q", prompt))
-				}
-			}
-		} else {
-			reasonerFn = func(prompt string) (string, error) {
-				return rt.RunDSL(ctx, fmt.Sprintf("claude %q", prompt))
-			}
-		}
-	}
-
-	// Build the DSL runner
-	runDSL := func(dsl string) (string, error) {
-		return rt.RunDSL(ctx, dsl)
-	}
-
-	engine, err := intent.NewEngine(*cfg, reasonerFn, runDSL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Intent engine error: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println("🎯 AgentScript Intent Mode")
-	fmt.Printf("   Sandbox:  %s\n", cfg.Sandbox)
-	if cfg.UseSession {
-		fmt.Printf("   Session:  %s", cfg.Reasoner)
-	} else {
-		fmt.Printf("   Reasoner: %s", cfg.Reasoner)
-	}
-	if cfg.ReasonerModel != "" {
-		fmt.Printf(" (%s)", cfg.ReasonerModel)
-	}
-	fmt.Println()
-	fmt.Printf("   Retries:  %d (delay %ds)\n", cfg.MaxRetries, cfg.RetryDelay)
-	fmt.Printf("   Mode:     %s\n", cfg.Mode)
-	fmt.Printf("   Intents:  %d\n", len(cfg.Intents))
-	fmt.Printf("   Checks:   %d\n", len(cfg.ValidateCmds))
-	fmt.Println()
-
-	// Wire token reporter if session mode
-	if session != nil {
-		engine.SetTokenReporter(func() {
-			fmt.Printf("\n   ┌─────────────────────────────────────────────┐\n")
-			fmt.Printf("   │ 📊 %s │\n", session.TokenSummary())
-			fmt.Printf("   └─────────────────────────────────────────────┘\n")
-		})
-	}
-
-	if err := engine.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "\n%v\n", err)
-		os.Exit(1)
-	}
-}

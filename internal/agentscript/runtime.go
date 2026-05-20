@@ -17,13 +17,11 @@ import (
 
 	"github.com/vinodhalaharvi/agentscript/pkg/cache"
 	"github.com/vinodhalaharvi/agentscript/pkg/claude"
-	"github.com/vinodhalaharvi/agentscript/pkg/coordinate"
 	agcrypto "github.com/vinodhalaharvi/agentscript/pkg/crypto"
 	"github.com/vinodhalaharvi/agentscript/pkg/gemini"
 	aggithub "github.com/vinodhalaharvi/agentscript/pkg/github"
 	"github.com/vinodhalaharvi/agentscript/pkg/google"
 	"github.com/vinodhalaharvi/agentscript/pkg/huggingface"
-	"github.com/vinodhalaharvi/agentscript/pkg/intent"
 	"github.com/vinodhalaharvi/agentscript/pkg/jobsearch"
 	"github.com/vinodhalaharvi/agentscript/pkg/mcp"
 	"github.com/vinodhalaharvi/agentscript/pkg/news"
@@ -171,16 +169,7 @@ func (r *Runtime) RunDSL(ctx context.Context, dsl string) (string, error) {
 //
 //	>=> match "| contains \"rain\" >=> notify \"slack\"\n| _ >=> save \"ok.md\""
 func preprocessDSL(dsl string) string {
-	// First pass: extract converge blocks
-	dsl = preprocessConverge(dsl)
-
-	// Same preprocessor, different keyword — coordinate blocks also need
-	// to be rewritten to `coordinate "name" "encoded-body"` so they
-	// survive the Participle grammar (which expects a Command with
-	// string args, not a multi-line block).
-	dsl = preprocessBlockCommand(dsl, "coordinate")
-
-	// Next pass: handle match blocks
+	// Match blocks
 	lines := strings.Split(dsl, "\n")
 	var out []string
 	i := 0
@@ -220,159 +209,7 @@ func preprocessDSL(dsl string) string {
 	return strings.Join(out, "\n")
 }
 
-// preprocessConverge extracts converge blocks and rewrites them as:
-//
-//	converge "name" "encoded-body"
-//
-// The body is the raw text between the outermost ( ) of the converge block,
-// with internal quotes escaped and newlines preserved via |||.
-func preprocessConverge(dsl string) string {
-	lines := strings.Split(dsl, "\n")
-	var out []string
-	i := 0
-
-	for i < len(lines) {
-		trimmed := strings.TrimSpace(lines[i])
-
-		// Look for: converge "name" (
-		// or:       >=> converge "name" (
-		//
-		// Must be followed by whitespace or quote — NOT a letter —
-		// otherwise `convergence` (used as a directive in coordinate
-		// blocks) would match and corrupt the output.
-		isConverge := false
-		prefix := ""
-		if idx := strings.Index(trimmed, "converge"); idx >= 0 {
-			after := idx + len("converge")
-			if after < len(trimmed) {
-				c := trimmed[after]
-				if c == ' ' || c == '\t' || c == '"' || c == '(' {
-					prefix = trimmed[:idx]
-					isConverge = true
-				}
-			}
-		}
-
-		if !isConverge {
-			out = append(out, lines[i])
-			i++
-			continue
-		}
-
-		// Find the name (first quoted string after converge)
-		convergeLine := trimmed
-		name := ""
-		nameStart := strings.Index(convergeLine, `"`)
-		if nameStart >= 0 {
-			nameEnd := strings.Index(convergeLine[nameStart+1:], `"`)
-			if nameEnd >= 0 {
-				name = convergeLine[nameStart+1 : nameStart+1+nameEnd]
-			}
-		}
-		if name == "" {
-			// Try single quotes
-			nameStart = strings.Index(convergeLine, `'`)
-			if nameStart >= 0 {
-				nameEnd := strings.Index(convergeLine[nameStart+1:], `'`)
-				if nameEnd >= 0 {
-					name = convergeLine[nameStart+1 : nameStart+1+nameEnd]
-				}
-			}
-		}
-
-		// Find the opening ( — might be on this line or next
-		depth := 0
-		started := false
-		var bodyLines []string
-		j := i
-
-		for j < len(lines) {
-			line := lines[j]
-			inDouble := false
-			inSingle := false
-			inBacktick := false
-			prev := byte(0)
-
-			for k := 0; k < len(line); k++ {
-				c := line[k]
-				inQ := inDouble || inSingle || inBacktick
-
-				if !inQ {
-					if c == '"' {
-						inDouble = true
-					} else if c == '\'' {
-						inSingle = true
-					} else if c == '`' {
-						inBacktick = true
-					}
-				} else {
-					if c == '"' && inDouble && prev != '\\' {
-						inDouble = false
-					} else if c == '\'' && inSingle && prev != '\\' {
-						inSingle = false
-					} else if c == '`' && inBacktick {
-						inBacktick = false
-					}
-				}
-
-				if !inDouble && !inSingle && !inBacktick {
-					if c == '(' {
-						depth++
-						if !started {
-							started = true
-							prev = c
-							continue
-						}
-					} else if c == ')' && started {
-						depth--
-						if depth == 0 {
-							// Wrap body in triple-quoted string — no escape
-							// games. Everything inside survives literally:
-							// newlines, quotes, backticks.
-							body := strings.Join(bodyLines, "\n")
-							rewritten := prefix + `converge "` + name + `" """` + body + `"""`
-							out = append(out, rewritten)
-							j++
-							goto nextLine
-						}
-					}
-				}
-
-				if started && depth > 0 {
-					// We're inside the body — will be captured below
-				}
-				prev = c
-			}
-
-			if started && depth > 0 {
-				// Capture entire line as part of body (skip the opening line's pre-( content)
-				if j == i {
-					// First line — capture from after the (
-					openIdx := strings.Index(line, "(")
-					if openIdx >= 0 && openIdx+1 < len(line) {
-						bodyLines = append(bodyLines, strings.TrimSpace(line[openIdx+1:]))
-					}
-				} else {
-					bodyLines = append(bodyLines, line)
-				}
-			}
-			j++
-		}
-
-		// If we get here, unclosed block — just pass through
-		out = append(out, lines[i])
-		i++
-		continue
-
-	nextLine:
-		i = j
-	}
-
-	return strings.Join(out, "\n")
-}
-
-// preprocessBlockCommand is a generalization of preprocessConverge. It
-// transforms any block command of the form:
+// preprocessBlockCommand transforms a block command of the form:
 //
 //	keyword "name" (
 //	  ...body...
@@ -382,14 +219,11 @@ func preprocessConverge(dsl string) string {
 //
 //	keyword "name" "encoded-body"
 //
-// where the body has newlines replaced by ||| and quotes escaped. This
-// is what lets block-style DSL commands (converge, coordinate, and
-// future ones) survive the single-line Participle grammar.
+// where the body is wrapped in a triple-quoted string. This lets
+// block-style DSL commands survive the single-line Participle grammar.
 //
-// The structure mirrors preprocessConverge exactly because the problem
-// is the same — only the keyword differs. Rather than copy-paste the
-// 150 lines of paren-balancing logic for each new block command, this
-// function takes the keyword as a parameter.
+// The keyword is parameterized so the same paren-balancing machinery
+// serves any future block command.
 func preprocessBlockCommand(dsl string, keyword string) string {
 	lines := strings.Split(dsl, "\n")
 	var out []string
@@ -841,14 +675,6 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 	case "emoji_style":
 		result, err = r.emojiStyleCmd(ctx, cmd.Arg, cmd.Arg2, cmd.Arg3, input)
 
-	// ==================== Converge (intent-driven loop) ====================
-	case "converge":
-		result, err = r.executeConverge(ctx, cmd.Arg, cmd.Arg2, input)
-
-	// ==================== Coordinate (multi-agent coordination) ====================
-	case "coordinate":
-		result, err = r.executeCoordinate(ctx, cmd.Arg, cmd.Arg2, input)
-
 	default:
 		err = fmt.Errorf("unknown action: %s", cmd.Action)
 	}
@@ -859,180 +685,6 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 
 	r.log("Result: %d bytes", len(result))
 	return result, nil
-}
-
-// executeConverge runs an intent-driven reconciliation loop.
-// name is the converge block name, body is the raw body text from between
-// the outermost ( ) of the converge block — delivered via triple-quoted
-// string in the rewritten form, so no decoding is needed.
-func (r *Runtime) executeConverge(ctx context.Context, name, body, input string) (string, error) {
-	// If there was piped input, make it available as a file the context can read
-	if input != "" {
-		os.WriteFile(".converge-input.txt", []byte(input), 0644)
-		defer os.Remove(".converge-input.txt")
-	}
-
-	// Parse the body using the intent parser
-	cfg, err := intent.ParseFile(body)
-	if err != nil {
-		return "", fmt.Errorf("converge %q parse error: %w", name, err)
-	}
-
-	// Build reasoner function (single-shot or session)
-	var reasonerFn intent.ReasonerFunc
-	var session *claude.Session
-
-	fmt.Printf("   DEBUG: UseSession=%v Reasoner=%q claude=%v\n", cfg.UseSession, cfg.Reasoner, r.claude != nil)
-	if cfg.UseSession && cfg.Reasoner == "claude" && r.claude != nil {
-		// Session mode — multi-turn conversation
-		session = r.claude.NewSession()
-
-		// Auto-read .agentscript.md from sandbox as system prompt
-		agentscriptMD := filepath.Join(cfg.Sandbox, ".agentscript.md")
-		if data, err := os.ReadFile(agentscriptMD); err == nil {
-			session.SystemPrompt = string(data)
-			fmt.Printf("📌 Loaded .agentscript.md (%d bytes) as system prompt\n", len(data))
-		}
-
-		reasonerFn = func(prompt string) (string, error) {
-			return session.Chat(ctx, prompt)
-		}
-	} else if cfg.Reasoner == "ollama" {
-		// Ollama (single-shot only for now)
-		if cfg.ReasonerModel != "" {
-			reasonerFn = func(prompt string) (string, error) {
-				return r.RunDSL(ctx, fmt.Sprintf("ollama %q %q", prompt, cfg.ReasonerModel))
-			}
-		} else {
-			reasonerFn = func(prompt string) (string, error) {
-				return r.RunDSL(ctx, fmt.Sprintf("ollama %q", prompt))
-			}
-		}
-	} else {
-		// Claude single-shot (default)
-		reasonerFn = func(prompt string) (string, error) {
-			return r.RunDSL(ctx, fmt.Sprintf("claude %q", prompt))
-		}
-	}
-
-	// Build DSL runner
-	runDSL := func(dsl string) (string, error) {
-		return r.RunDSL(ctx, dsl)
-	}
-
-	// Create and run engine
-	engine, err := intent.NewEngine(*cfg, reasonerFn, runDSL)
-	if err != nil {
-		return "", fmt.Errorf("converge %q engine error: %w", name, err)
-	}
-
-	// Wire token reporter + compactor if session mode
-	if session != nil {
-		engine.SetTokenReporter(func() {
-			fmt.Printf("\n   ┌─────────────────────────────────────────────┐\n")
-			fmt.Printf("   │ 📊 %s │\n", session.TokenSummary())
-			fmt.Printf("   └─────────────────────────────────────────────┘\n")
-		})
-
-		// Keep only the most recent assistant response in full. Prior
-		// proposals have been applied to the sandbox — their text is
-		// dead weight on every subsequent Chat() call.
-		engine.SetCompactor(func() {
-			before := session.MessageCount()
-			session.CompactOldAssistantMessages(1)
-			_ = before // reserved for future verbose logging
-		})
-	}
-
-	fmt.Printf("\n🎯 Converge: %s\n", name)
-	fmt.Printf("   Sandbox:  %s\n", cfg.Sandbox)
-	if cfg.UseSession {
-		fmt.Printf("   Session:  %s", cfg.Reasoner)
-	} else {
-		fmt.Printf("   Reasoner: %s", cfg.Reasoner)
-	}
-	if cfg.ReasonerModel != "" {
-		fmt.Printf(" (%s)", cfg.ReasonerModel)
-	}
-	fmt.Println()
-	fmt.Printf("   Retries:  %d (delay %ds)\n", cfg.MaxRetries, cfg.RetryDelay)
-	fmt.Printf("   Mode:     %s\n", cfg.Mode)
-	if cfg.PatchMode {
-		fmt.Println("   Git:      patch mode")
-		if cfg.Branch != "" {
-			fmt.Printf("   Branch:   %s\n", cfg.Branch)
-		}
-		if cfg.Base != "" {
-			fmt.Printf("   Base:     %s\n", cfg.Base)
-		}
-		if cfg.AutoCommit {
-			fmt.Printf("   Commit:   auto (%s)\n", cfg.CommitPrefix)
-		}
-		if cfg.AutoRebase {
-			fmt.Println("   Rebase:   auto")
-		}
-	}
-	fmt.Printf("   Intents:  %d\n", len(cfg.Intents))
-	fmt.Printf("   Checks:   %d\n", len(cfg.ValidateCmds))
-
-	if err := engine.Run(); err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("converge %q: all intents satisfied", name), nil
-}
-
-// executeCoordinate runs a multi-agent coordinate block.
-// The body is encoded the same way as converge (||| separated lines with
-// escaped quotes), produced by preprocessBlockCommand.
-//
-// Unlike converge (which iterates against a validation set), coordinate
-// spins up multiple agents that subscribe to a shared blackboard. The
-// engine advances rounds, dispatches events, and terminates when the
-// configured convergence predicate is satisfied.
-//
-// Input is optional piped text from >=>. If present, we treat it as
-// seed content for the board under the key "__input__".
-func (r *Runtime) executeCoordinate(ctx context.Context, name, body, input string) (string, error) {
-	cfg, err := coordinate.ParseCoordinateBody(name, body)
-	if err != nil {
-		return "", fmt.Errorf("coordinate %q parse error: %w", name, err)
-	}
-
-	// DIAG: body inspection BEFORE parsing. Dumps the ENTIRE body the
-	// grammar handed us, so we can verify what reached parsing. If the
-	// context block is missing from here, the bug is upstream (grammar
-	// or preprocessor). If it's present but cfg.MaxRounds shows default,
-	// the bug is in ParseCoordinateBody.
-	fmt.Printf("\n   ====== DIAG: body reaching executeCoordinate ======\n")
-	fmt.Printf("   length=%d bytes\n", len(body))
-	fmt.Printf("   contains 'context (':    %v\n", strings.Contains(body, "context ("))
-	fmt.Printf("   contains 'max_rounds':   %v\n", strings.Contains(body, "max_rounds"))
-	fmt.Printf("   FULL BODY:\n")
-	fmt.Printf("-------8<-------\n%s\n------->8-------\n", body)
-	fmt.Printf("   parsed cfg — coord=%q conv=%q stability=%d max_rounds=%d agents=%d\n",
-		cfg.Coordination, cfg.Convergence, cfg.StabilityRounds, cfg.MaxRounds, len(cfg.Agents))
-	fmt.Printf("   ====== END DIAG ======\n\n")
-
-	// Engine needs a Claude client — require CLAUDE_API_KEY for now
-	if r.claude == nil {
-		return "", fmt.Errorf("coordinate %q: Claude client not initialized; set CLAUDE_API_KEY", name)
-	}
-
-	engine := coordinate.NewEngine(cfg, r.claude)
-
-	// If we got piped input, seed it onto the board under a conventional key
-	if input != "" {
-		engine.SeedEntries = []coordinate.SeedEntry{
-			{Key: "__input__", Value: input},
-		}
-	}
-
-	witness, err := engine.Run(ctx)
-	if err != nil {
-		return "", err
-	}
-	return witness, nil
 }
 
 // geminiCall makes a call to the Gemini API
