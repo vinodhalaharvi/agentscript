@@ -4,3 +4,9 @@ token.json
 /agentscript
 *.log
 mcp_agent
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml
+.DS_Store
