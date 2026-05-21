@@ -12,6 +12,7 @@ The translator is being built in slices (see §14). Current state:
 
 | Phase | Arrow | Status |
 |-------|-------|--------|
+| Translate | `Arrow[prose, Source]` | **Merged** — `pkg/script/translate.go` (LLM seam) |
 | Parse | `Arrow[Source, AST]` | **Merged** — `pkg/script/parse.go` |
 | Resolve | `Arrow[AST, ResolvedAST]` | **Merged** — `pkg/script/resolve.go` + `registry/` |
 | Lower | `Arrow[ResolvedAST, Lowered]` | **Merged** — `pkg/script/lower.go` |
@@ -19,8 +20,14 @@ The translator is being built in slices (see §14). Current state:
 | Validate | `Arrow[sibyl.Plan, sibyl.Plan]` | **Merged** — `pkg/script/lower.go` |
 | Submit | `Arrow[sibyl.Plan, WorkflowHandle]` | **Merged** — `pkg/script/submit.go` |
 
-The full pipeline (`Compile` = Parse..Validate, `Run` = Compile + Submit)
-is in `pkg/script/submit.go`, importable from outside the module. The
+The full pipeline (`Compile` = Parse..Validate, `Run` = Compile + Submit,
+`TranslateAndCompile` = Translate + Compile) is in `pkg/script/`,
+importable from outside the module. `Translate` is the prose→DSL phase:
+it owns the grammar prompt (built from `registry.Names()`, so available
+commands are always the real current set) and takes the LLM as an
+injected `CompleteFunc` seam — the package picks no provider. A
+prose-driven front end (loom) hands over prose and gets back a validated
+Plan, carrying no grammar knowledge of its own. The
 lowering target is Sibyl's serializable `Plan` (a DAG of named-activity
 references) executed by the generic `PlanWorkflow` — not the removed
 in-process closure DAG. The first builtin, `echo`, binds to Sibyl's

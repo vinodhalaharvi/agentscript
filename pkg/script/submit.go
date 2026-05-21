@@ -69,12 +69,16 @@ func SubmitWith(c client.Client, taskQueue string) func(context.Context, sibyl.P
 	}
 }
 
-// Run compiles and submits source in one call, returning the workflow
-// handle. The caller awaits handle.Get for the PlanResult.
-func Run(ctx context.Context, reg *registry.Registry, c client.Client, src Source, taskQueue string) (client.WorkflowRun, error) {
-	plan, err := Compile(ctx, reg, src)
+// TranslateAndCompile is the full front-half for a prose-driven caller:
+// prose → DSL (via the LLM) → validated Plan. It is Translate followed by
+// Compile, the two phases a front end like loom runs before submitting.
+// A translation failure (LLM error) and a compile failure (unknown
+// builtin, bad arity, malformed graph) are both returned here, before
+// anything executes.
+func TranslateAndCompile(ctx context.Context, complete CompleteFunc, reg *registry.Registry, prose string) (sibyl.Plan, error) {
+	src, err := Translate(ctx, complete, reg, prose)
 	if err != nil {
-		return nil, err
+		return sibyl.Plan{}, err
 	}
-	return Submit(ctx, c, plan, "", taskQueue)
+	return Compile(ctx, reg, src)
 }
