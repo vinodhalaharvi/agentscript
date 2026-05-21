@@ -25,7 +25,7 @@ import (
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
 
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/ast"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/ast"
 )
 
 // === Parse arrow ===========================================================

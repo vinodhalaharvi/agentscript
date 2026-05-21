@@ -28,8 +28,8 @@ import (
 
 	sibyl "github.com/vinodhalaharvi/sibyl/agent"
 
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/ast"
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/resolved"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/ast"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/resolved"
 )
 
 // fragment is a partial plan under construction. Nodes accumulate as the

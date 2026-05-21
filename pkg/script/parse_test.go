@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script"
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/ast"
+	"github.com/vinodhalaharvi/agentscript/pkg/script"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/ast"
 )
 
 // === Helpers ===============================================================

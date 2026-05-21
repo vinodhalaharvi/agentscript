@@ -12,7 +12,7 @@ package script
 import (
 	sibyl "github.com/vinodhalaharvi/sibyl/agent"
 
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/registry"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/registry"
 )
 
 // EchoSpec is the BuiltinSpec for the echo builtin. It takes one

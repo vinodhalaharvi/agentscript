@@ -17,9 +17,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/ast"
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/registry"
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/resolved"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/ast"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/registry"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/resolved"
 )
 
 // Resolve binds an AST to a Registry, producing a ResolvedAST. Because

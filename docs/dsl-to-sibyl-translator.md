@@ -1,6 +1,6 @@
 # AgentScript → Sibyl: DSL Translator Design Memo
 
-**Status:** Partially implemented. Parse and Resolve are merged; Lower → Submit and the CLI are in progress. See "Implementation status" below.
+**Status:** Translator MVP complete. The full pipeline (Parse → Resolve → Lower → Finalize → Validate → Submit) is merged and importable at `pkg/script/`; `echo` runs end-to-end against Sibyl's `PlanWorkflow`. See "Implementation status" below.
 **Companion repo:** [vinodhalaharvi/sibyl](https://github.com/vinodhalaharvi/sibyl) (the execution layer)
 **Implements against:** Sibyl's `agents.WithOAuth` behavior, `ConvergeWorkflow`, `ToolAgentArrow`, `SupervisorWorkflow`, and the existing DAG execution model.
 
@@ -12,17 +12,25 @@ The translator is being built in slices (see §14). Current state:
 
 | Phase | Arrow | Status |
 |-------|-------|--------|
-| Parse | `Arrow[Source, AST]` | **Merged** — `internal/agentscript/script/parse.go` |
-| Resolve | `Arrow[AST, ResolvedAST]` | **Merged** — `internal/agentscript/script/resolve.go` + `registry/` |
-| Lower | `Arrow[ResolvedAST, DAGFragment]` | Pending |
-| Finalize | `Arrow[DAGFragment, sibyl.DAG]` | Pending |
-| Validate | `Arrow[sibyl.DAG, sibyl.DAG]` | Pending |
-| Submit | `Arrow[sibyl.DAG, WorkflowHandle]` | Pending |
+| Parse | `Arrow[Source, AST]` | **Merged** — `pkg/script/parse.go` |
+| Resolve | `Arrow[AST, ResolvedAST]` | **Merged** — `pkg/script/resolve.go` + `registry/` |
+| Lower | `Arrow[ResolvedAST, Lowered]` | **Merged** — `pkg/script/lower.go` |
+| Finalize | `Arrow[Lowered, sibyl.Plan]` | **Merged** — `pkg/script/lower.go` |
+| Validate | `Arrow[sibyl.Plan, sibyl.Plan]` | **Merged** — `pkg/script/lower.go` |
+| Submit | `Arrow[sibyl.Plan, WorkflowHandle]` | **Merged** — `pkg/script/submit.go` |
+
+The full pipeline (`Compile` = Parse..Validate, `Run` = Compile + Submit)
+is in `pkg/script/submit.go`, importable from outside the module. The
+lowering target is Sibyl's serializable `Plan` (a DAG of named-activity
+references) executed by the generic `PlanWorkflow` — not the removed
+in-process closure DAG. The first builtin, `echo`, binds to Sibyl's
+`Echo` activity; the `agentscript-run` CLI compiles a `.as` file to a
+Plan (`--dry-run` to print it, otherwise submit to a Temporal worker).
 
 On the Sibyl side, the convergence-primitive arrows this memo depends on
 (`ConvergeArrow`, `SupervisorArrow`; `ToolAgentArrow` already existed) are
-merged. The sections below describe the full design; phases marked Pending
-above are specified but not yet built.
+merged, as are the serializable `Plan`, `PlanWorkflow`, and `Echo`
+activity the translator lowers into.
 
 ---
 

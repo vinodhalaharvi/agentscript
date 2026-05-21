@@ -6,8 +6,8 @@ import (
 
 	sibyl "github.com/vinodhalaharvi/sibyl/agent"
 
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script"
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/registry"
+	"github.com/vinodhalaharvi/agentscript/pkg/script"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/registry"
 )
 
 // compile is a helper: source → Plan via the full Compile pipeline using

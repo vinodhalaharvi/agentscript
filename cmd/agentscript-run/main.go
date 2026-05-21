@@ -30,7 +30,7 @@ import (
 
 	sibyl "github.com/vinodhalaharvi/sibyl/agent"
 
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script"
+	"github.com/vinodhalaharvi/agentscript/pkg/script"
 )
 
 func main() {
