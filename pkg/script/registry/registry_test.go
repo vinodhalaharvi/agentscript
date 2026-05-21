@@ -3,7 +3,7 @@ package registry_test
 import (
 	"testing"
 
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/registry"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/registry"
 )
 
 func echoSpec() registry.BuiltinSpec {

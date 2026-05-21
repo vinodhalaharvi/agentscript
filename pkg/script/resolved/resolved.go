@@ -9,8 +9,8 @@
 package resolved
 
 import (
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/ast"
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript/script/registry"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/ast"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/registry"
 )
 
 // AST is a fully resolved program: a list of resolved blocks.

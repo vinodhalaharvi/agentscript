@@ -273,7 +273,7 @@ A second execution path is being built: an arrow-first translator that
 compiles AgentScript into [Sibyl](https://github.com/vinodhalaharvi/sibyl)
 DAGs for durable, Temporal-backed execution. The design is documented in
 [`docs/dsl-to-sibyl-translator.md`](docs/dsl-to-sibyl-translator.md); the
-translator code is under `internal/agentscript/script/`. The existing
+translator code is under `pkg/script/`. The existing
 in-process runtime continues to serve as the fast "memory" backend.
 
 ## Project Structure
@@ -366,7 +366,7 @@ go test ./...
 go test -race ./...
 
 # A single package
-go test ./internal/agentscript/script/...
+go test ./pkg/script/...
 ```
 
 CI (GitHub Actions) runs `go mod tidy`, `go vet -structtag=false`, `gofmt`,
