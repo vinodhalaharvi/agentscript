@@ -126,6 +126,45 @@ type BuiltinSpec struct {
 	// AuthHint declares the builtin's default credential source. Advisory
 	// in the MVP.
 	AuthHint AuthSource
+	// Backends declares which execution backends this builtin can run on.
+	// A builtin is always resolvable (so the vocabulary is complete and
+	// backwards-compatible), but availability is per-backend: a verb in
+	// the registry that lists only BackendMemory resolves fine, runs on
+	// the memory interpreter, and yields a clear "not implemented on
+	// temporal" — distinct from an unknown-verb error. Empty is treated
+	// as "memory only" for safety (a verb with no declared temporal
+	// activity must not be dispatched to Temporal).
+	Backends []Backend
+}
+
+// Backend identifies an execution backend a builtin supports. It mirrors
+// the ast.Backend keyword (memory | temporal) but lives here so the
+// registry — the single source of truth for "what runs where" — has no
+// dependency on the ast package.
+type Backend int
+
+const (
+	// BackendMemory is the in-process tree-walking interpreter, which
+	// implements the full historical verb set.
+	BackendMemory Backend = iota
+	// BackendTemporal is the durable Sibyl PlanWorkflow path; a verb is
+	// available here only once it has a registered Sibyl activity.
+	BackendTemporal
+)
+
+// SupportsBackend reports whether the builtin can run on b. An empty
+// Backends list means memory-only (the safe default): a verb with no
+// explicitly declared backend must never be dispatched to Temporal.
+func (s BuiltinSpec) SupportsBackend(b Backend) bool {
+	if len(s.Backends) == 0 {
+		return b == BackendMemory
+	}
+	for _, x := range s.Backends {
+		if x == b {
+			return true
+		}
+	}
+	return false
 }
 
 // === Registry ==============================================================

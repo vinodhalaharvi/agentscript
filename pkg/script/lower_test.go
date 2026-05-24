@@ -159,6 +159,10 @@ func TestCompile_CustomBuiltin(t *testing.T) {
 		ArgSchema: registry.ArgSchema{
 			Params: []registry.ParamSpec{{Name: "text", Type: registry.StringT}},
 		},
+		// This custom builtin is exercised under a temporal block, so it
+		// must declare temporal support (mirroring how a real ported verb
+		// is registered).
+		Backends: []registry.Backend{registry.BackendTemporal},
 	})
 	plan, err := script.Compile(context.Background(), r, script.Source(`temporal static ( shout "hey" )`))
 	if err != nil {

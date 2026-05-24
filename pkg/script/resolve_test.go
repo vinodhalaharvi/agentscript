@@ -19,8 +19,9 @@ func echoReg(t *testing.T) *registry.Registry {
 	t.Helper()
 	r := registry.New()
 	r.MustRegister(registry.BuiltinSpec{
-		Name:    "echo",
-		AgentID: "agentscript/echo",
+		Name:     "echo",
+		Backends: []registry.Backend{registry.BackendTemporal, registry.BackendMemory},
+		AgentID:  "agentscript/echo",
 		ArgSchema: registry.ArgSchema{
 			Params: []registry.ParamSpec{{Name: "message", Type: registry.StringT}},
 		},
@@ -213,8 +214,9 @@ func TestResolve_TooManyArgs(t *testing.T) {
 func TestResolve_OptionalArg(t *testing.T) {
 	r := registry.New()
 	r.MustRegister(registry.BuiltinSpec{
-		Name:    "greet",
-		AgentID: "agentscript/greet",
+		Name:     "greet",
+		Backends: []registry.Backend{registry.BackendTemporal, registry.BackendMemory},
+		AgentID:  "agentscript/greet",
 		ArgSchema: registry.ArgSchema{
 			Params: []registry.ParamSpec{
 				{Name: "name", Type: registry.StringT},
@@ -243,8 +245,9 @@ func TestResolve_OptionalArg(t *testing.T) {
 func TestResolve_Variadic(t *testing.T) {
 	r := registry.New()
 	r.MustRegister(registry.BuiltinSpec{
-		Name:    "concat",
-		AgentID: "agentscript/concat",
+		Name:     "concat",
+		Backends: []registry.Backend{registry.BackendTemporal, registry.BackendMemory},
+		AgentID:  "agentscript/concat",
 		ArgSchema: registry.ArgSchema{
 			Params:       []registry.ParamSpec{{Name: "first", Type: registry.StringT}},
 			Variadic:     true,
@@ -271,6 +274,7 @@ func TestResolve_NoArgBuiltin(t *testing.T) {
 	r := registry.New()
 	r.MustRegister(registry.BuiltinSpec{
 		Name:      "now",
+		Backends:  []registry.Backend{registry.BackendTemporal, registry.BackendMemory},
 		AgentID:   "agentscript/now",
 		ArgSchema: registry.ArgSchema{}, // no params
 	})

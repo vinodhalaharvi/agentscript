@@ -30,6 +30,9 @@ func EchoSpec() registry.BuiltinSpec {
 				{Name: "text", Type: registry.StringT, Optional: true},
 			},
 		},
+		// echo is the one builtin available on BOTH backends: the
+		// in-process interpreter and Sibyl's registered Echo activity.
+		Backends: []registry.Backend{registry.BackendMemory, registry.BackendTemporal},
 	}
 }
 
