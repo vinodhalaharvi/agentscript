@@ -6,6 +6,7 @@ require (
 	github.com/alecthomas/participle/v2 v2.1.1
 	github.com/lib/pq v1.12.3
 	github.com/vinodhalaharvi/sibyl v0.1.1-0.20260521024214-bfa4bcb5ee5f
+	github.com/vinodhalaharvi/weft v0.1.0
 	go.temporal.io/sdk v1.41.1
 	golang.org/x/oauth2 v0.30.0
 	google.golang.org/api v0.197.0
@@ -43,7 +44,6 @@ require (
 	github.com/robfig/cron v1.2.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
-	github.com/vinodhalaharvi/weft v0.1.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.54.0 // indirect

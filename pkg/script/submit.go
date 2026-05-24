@@ -18,37 +18,44 @@ import (
 	"go.temporal.io/sdk/client"
 
 	sibyl "github.com/vinodhalaharvi/sibyl/agent"
+	"github.com/vinodhalaharvi/weft/weft"
 
+	"github.com/vinodhalaharvi/agentscript/pkg/script/ast"
 	"github.com/vinodhalaharvi/agentscript/pkg/script/registry"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/resolved"
 )
 
-// Compile runs Parse >>> Resolve >>> Lower >>> Finalize >>> Validate,
-// producing a validated sibyl.Plan. It does not submit. The registry
-// supplies the builtin→activity bindings Resolve and Lower need.
+// Compile runs Parse >=> Resolve >=> Lower >=> Finalize >=> Validate,
+// producing a validated sibyl.Plan. It does not submit.
+//
+// The pipeline is built by composing weft.Arrow values with weft.Pipe —
+// not by hand-threading errors. Each phase is an Arrow[A,B]; composition
+// is type-checked at every seam (a phase whose output type doesn't match
+// the next phase's input simply won't compile), and weft.Compose handles
+// the error short-circuiting. This is the "everything composes" contract
+// made literal: Compile IS the composition of the phase arrows.
 //
 // Compile is the heart of the "AgentScript as serialization layer" idea:
-// it turns source text into a validated, serializable execution plan,
-// rejecting unknown builtins, arity/type errors (Resolve) and malformed
-// graphs (Validate) before anything runs. A front end that has an LLM
-// emit DSL gets this whole safety net for free.
+// source text in, validated executable Plan out, with unknown builtins,
+// arity/type errors (Resolve) and malformed graphs (Validate) all
+// rejected before anything runs.
 func Compile(ctx context.Context, reg *registry.Registry, src Source) (sibyl.Plan, error) {
-	a, err := Parse(ctx, src)
-	if err != nil {
-		return sibyl.Plan{}, err
-	}
-	r, err := Resolve(ctx, reg, a)
-	if err != nil {
-		return sibyl.Plan{}, err
-	}
-	lowered, err := Lower(ctx, r)
-	if err != nil {
-		return sibyl.Plan{}, err
-	}
-	plan, err := Finalize(ctx, lowered)
-	if err != nil {
-		return sibyl.Plan{}, err
-	}
-	return Validate(ctx, plan)
+	return CompileArrow(reg)(ctx, src)
+}
+
+// CompileArrow returns the compile pipeline as a single composed
+// weft.Arrow[Source, sibyl.Plan], curried over the registry. Callers that
+// want to compose compilation into a larger arrow (or submit via
+// SubmitWith) use this directly; Compile is the convenience that applies
+// it.
+func CompileArrow(reg *registry.Registry) weft.Arrow[Source, sibyl.Plan] {
+	return weft.Pipe5(
+		weft.Arrow[Source, ast.AST](Parse),
+		weft.Arrow[ast.AST, resolved.AST](ResolveWith(reg)),
+		weft.Arrow[resolved.AST, Lowered](Lower),
+		weft.Arrow[Lowered, sibyl.Plan](Finalize),
+		weft.Arrow[sibyl.Plan, sibyl.Plan](Validate),
+	)
 }
 
 // Submit starts the compiled plan as a Sibyl PlanWorkflow via the given
@@ -76,9 +83,14 @@ func SubmitWith(c client.Client, taskQueue string) func(context.Context, sibyl.P
 // builtin, bad arity, malformed graph) are both returned here, before
 // anything executes.
 func TranslateAndCompile(ctx context.Context, complete CompleteFunc, reg *registry.Registry, prose string) (sibyl.Plan, error) {
-	src, err := Translate(ctx, complete, reg, prose)
-	if err != nil {
-		return sibyl.Plan{}, err
+	// prose → Source via the LLM, curried as an arrow, then composed with
+	// the compile pipeline. Translate >=> Compile, both Arrow values.
+	translateArrow := func(ctx context.Context, p string) (Source, error) {
+		return Translate(ctx, complete, reg, p)
 	}
-	return Compile(ctx, reg, src)
+	pipeline := weft.Pipe2(
+		weft.Arrow[string, Source](translateArrow),
+		CompileArrow(reg),
+	)
+	return pipeline(ctx, prose)
 }
