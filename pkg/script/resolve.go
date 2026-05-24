@@ -53,19 +53,19 @@ func ResolveWith(reg *registry.Registry) func(context.Context, ast.AST) (resolve
 }
 
 func resolveBlock(reg *registry.Registry, b ast.Block) (resolved.Block, error) {
-	body, err := resolveNode(reg, b.Body)
+	body, err := resolveNode(reg, b.Backend, b.Body)
 	if err != nil {
 		return resolved.Block{}, err
 	}
 	return resolved.Block{Backend: b.Backend, Mode: b.Mode, Body: body}, nil
 }
 
-func resolveNode(reg *registry.Registry, n ast.Node) (resolved.Node, error) {
+func resolveNode(reg *registry.Registry, backend ast.Backend, n ast.Node) (resolved.Node, error) {
 	switch node := n.(type) {
 	case ast.Pipeline:
 		stages := make([]resolved.Node, 0, len(node.Stages))
 		for i, s := range node.Stages {
-			rs, err := resolveNode(reg, s)
+			rs, err := resolveNode(reg, backend, s)
 			if err != nil {
 				return nil, fmt.Errorf("stage %d: %w", i, err)
 			}
@@ -76,7 +76,7 @@ func resolveNode(reg *registry.Registry, n ast.Node) (resolved.Node, error) {
 	case ast.Parallel:
 		branches := make([]resolved.Node, 0, len(node.Branches))
 		for i, br := range node.Branches {
-			rb, err := resolveNode(reg, br)
+			rb, err := resolveNode(reg, backend, br)
 			if err != nil {
 				return nil, fmt.Errorf("branch %d: %w", i, err)
 			}
@@ -85,14 +85,16 @@ func resolveNode(reg *registry.Registry, n ast.Node) (resolved.Node, error) {
 		return resolved.Parallel{Branches: branches}, nil
 
 	case ast.Call:
-		return resolveCall(reg, node)
+		return resolveCall(reg, backend, node)
 
 	default:
 		return nil, fmt.Errorf("unknown AST node type %T", n)
 	}
 }
 
-func resolveCall(reg *registry.Registry, c ast.Call) (resolved.Node, error) {
+func resolveCall(reg *registry.Registry, backend ast.Backend, c ast.Call) (resolved.Node, error) {
+	// Vocabulary check: is this a real verb at all? A genuinely unknown
+	// name (typo, hallucination) fails here — the safety net.
 	spec, ok := reg.Lookup(c.Name)
 	if !ok {
 		return nil, &UnknownBuiltinError{Name: c.Name, Known: reg.Names()}
@@ -100,7 +102,36 @@ func resolveCall(reg *registry.Registry, c ast.Call) (resolved.Node, error) {
 	if err := validateArgs(c, spec); err != nil {
 		return nil, err
 	}
+	// Availability check: the verb exists, but does it run on THIS
+	// backend yet? A known verb targeted at an unsupported backend yields
+	// a distinct NotImplementedOnBackendError — never confused with an
+	// unknown verb. This is what keeps the registry complete (every real
+	// verb resolves) while being honest about where each can execute.
+	if err := checkBackend(c.Name, spec, backend); err != nil {
+		return nil, err
+	}
 	return resolved.Call{Name: c.Name, Args: c.Args, Spec: spec}, nil
+}
+
+// checkBackend verifies the builtin supports the block's backend. The
+// ast.Backend keyword is mapped to the registry's Backend enum.
+func checkBackend(name string, spec registry.BuiltinSpec, backend ast.Backend) error {
+	var rb registry.Backend
+	switch backend {
+	case ast.BackendMemory:
+		rb = registry.BackendMemory
+	case ast.BackendTemporal:
+		rb = registry.BackendTemporal
+	default:
+		// Unknown/zero backend: don't block resolution on it here; the
+		// parser guarantees a valid backend, and Finalize/dispatch will
+		// handle anything unexpected.
+		return nil
+	}
+	if !spec.SupportsBackend(rb) {
+		return &NotImplementedOnBackendError{Builtin: name, Backend: backend.String()}
+	}
+	return nil
 }
 
 // validateArgs checks a call's arguments against the builtin's schema:
@@ -179,6 +210,21 @@ func (e *UnknownBuiltinError) Error() string {
 		return fmt.Sprintf("unknown builtin %q (no builtins registered)", e.Name)
 	}
 	return fmt.Sprintf("unknown builtin %q (known: %s)", e.Name, strings.Join(e.Known, ", "))
+}
+
+// NotImplementedOnBackendError is returned when a Call references a verb
+// that IS in the registry (a real, known verb) but does not yet run on
+// the block's target backend. It is deliberately distinct from
+// UnknownBuiltinError: the verb is recognized vocabulary, it just isn't
+// available on this backend yet (e.g. a memory-only verb under a temporal
+// block, before it has a registered Sibyl activity).
+type NotImplementedOnBackendError struct {
+	Builtin string
+	Backend string
+}
+
+func (e *NotImplementedOnBackendError) Error() string {
+	return fmt.Sprintf("builtin %q is not implemented on the %s backend yet", e.Builtin, e.Backend)
 }
 
 // ArityError is returned when a call has the wrong number of arguments.
