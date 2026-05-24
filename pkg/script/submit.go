@@ -25,6 +25,22 @@ import (
 	"github.com/vinodhalaharvi/agentscript/pkg/script/resolved"
 )
 
+// TranslateGrammar is the discovery-driven translate entry: it takes a
+// GrammarInfo (from Grammar()) instead of a registry, so a front end can
+// pipe discovery straight into translation without ever touching or
+// naming a registry. This is the "dumb pipe" path — loom calls Grammar(),
+// passes the result here, and forwards the output.
+func TranslateGrammar(ctx context.Context, complete CompleteFunc, g GrammarInfo, prose string) (Source, error) {
+	return Translate(ctx, complete, g.Registry, prose)
+}
+
+// CompileGrammar compiles source against a GrammarInfo's registry. Pairs
+// with TranslateGrammar so a discovery-driven front end never names a
+// registry for either phase.
+func CompileGrammar(ctx context.Context, g GrammarInfo, src Source) (sibyl.Plan, error) {
+	return Compile(ctx, g.Registry, src)
+}
+
 // Compile runs Parse >=> Resolve >=> Lower >=> Finalize >=> Validate,
 // producing a validated sibyl.Plan. It does not submit.
 //
