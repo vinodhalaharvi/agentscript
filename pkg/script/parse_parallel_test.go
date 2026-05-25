@@ -8,16 +8,16 @@ import (
 	"github.com/vinodhalaharvi/agentscript/pkg/script/ast"
 )
 
-// The new parser MUST support parenthesized parallel <*>, matching the
-// original internal/agentscript grammar. This is a hard regression guard:
-// <*> worked in the original runtime and must work in pkg/script too.
+// Parallel <*> must work, with the block's OWN parens wrapping the
+// parallel (bare-body), matching the original internal/agentscript
+// grammar. This is the exact shape the LLM emits.
 func TestParse_ParallelForms(t *testing.T) {
 	cases := []string{
-		`memory static ( ( a "x" <*> b "y" ) )`,
-		`memory static ( ( a "x" <*> b "y" <*> c "z" ) )`,
+		`memory static ( a "x" <*> b "y" )`,
+		`memory static ( a "x" <*> b "y" <*> c "z" )`,
 		`memory static ( ( a "x" <*> b "y" ) >=> merge )`,
 		`memory static ( ( a >=> b <*> c >=> d ) >=> merge >=> e "q" )`,
-		`temporal static ( ( echo "x" <*> echo "y" ) )`,
+		`temporal static ( echo "x" <*> echo "y" )`,
 	}
 	for _, src := range cases {
 		if _, err := script.Parse(context.Background(), script.Source(src)); err != nil {
@@ -26,17 +26,10 @@ func TestParse_ParallelForms(t *testing.T) {
 	}
 }
 
-// The parser must produce an ast.Parallel node for a multi-branch group.
-// Block bodies are always wrapped in a Pipeline (the uniform invariant),
-// so for `( ( a <*> b ) )` the body is a one-stage Pipeline whose stage
-// is the Parallel.
-func TestParse_ProducesParallelNode(t *testing.T) {
-	a, err := script.Parse(context.Background(), script.Source(`memory static ( ( a "x" <*> b "y" ) )`))
+func TestParse_BareBodyParallel(t *testing.T) {
+	a, err := script.Parse(context.Background(), script.Source(`memory static ( a "x" <*> b "y" )`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
-	}
-	if len(a.Blocks) != 1 {
-		t.Fatalf("blocks = %d", len(a.Blocks))
 	}
 	pipe, ok := a.Blocks[0].Body.(ast.Pipeline)
 	if !ok {
@@ -54,24 +47,19 @@ func TestParse_ProducesParallelNode(t *testing.T) {
 	}
 }
 
-// A single-branch group is just grouping — its body must not contain a
-// Parallel node.
-func TestParse_SingleGroupIsNotParallel(t *testing.T) {
-	a, err := script.Parse(context.Background(), script.Source(`memory static ( ( a "x" ) )`))
+func TestParse_SequentialIsNotParallel(t *testing.T) {
+	a, err := script.Parse(context.Background(), script.Source(`memory static ( a "x" >=> b "y" )`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	pipe, ok := a.Blocks[0].Body.(ast.Pipeline)
-	if !ok {
-		t.Fatalf("body should be ast.Pipeline, got %T", a.Blocks[0].Body)
-	}
-	if _, isPar := pipe.Stages[0].(ast.Parallel); isPar {
-		t.Error("single-branch group must not be a Parallel")
+	pipe := a.Blocks[0].Body.(ast.Pipeline)
+	for _, s := range pipe.Stages {
+		if _, isPar := s.(ast.Parallel); isPar {
+			t.Error("sequential pipeline must not contain a Parallel stage")
+		}
 	}
 }
 
-// End to end: a parallel program parses AND resolves against the full
-// registry (the complex grammar the CLI examples use).
 func TestParse_ComplexGrammarResolves(t *testing.T) {
 	src := `memory static ( ( search "x" >=> analyze "s" <*> search "y" >=> analyze "s" ) >=> merge >=> ask "who wins?" )`
 	a, err := script.Parse(context.Background(), script.Source(src))

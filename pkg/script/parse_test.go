@@ -263,10 +263,12 @@ func TestParse_RejectsTrailingArrow(t *testing.T) {
 	parseErr(t, `temporal static ( echo "a" >=> )`)
 }
 
-func TestParse_RejectsParallelOperatorForNow(t *testing.T) {
-	// <*> is reserved syntax but not in the MVP grammar. Parsing it
-	// should fail until the grammar is extended.
-	parseErr(t, `temporal static ( echo "a" <*> echo "b" )`)
+func TestParse_AcceptsParallelOperator(t *testing.T) {
+	// <*> parallel fan-out is now part of the grammar (parity with the
+	// original internal/agentscript grammar). It must parse.
+	if _, err := script.Parse(context.Background(), script.Source(`temporal static ( echo "a" <*> echo "b" )`)); err != nil {
+		t.Errorf("parallel <*> should parse now: %v", err)
+	}
 }
 
 // === Order: backend must precede mode ======================================
