@@ -84,13 +84,23 @@ type parsedScript struct {
 	Blocks []*parsedBlock `@@+`
 }
 
-// parsedBlock matches: <backend> <mode> ( <pipeline> )
+// parsedBlock matches: <backend> <mode> ( <expr> )
 type parsedBlock struct {
-	Backend string          `@("memory" | "temporal")`
-	Mode    string          `@("static" | "dynamic")`
-	OpenP   struct{}        `"("`
-	Body    *parsedPipeline `@@`
-	CloseP  struct{}        `")"`
+	Backend string      `@("memory" | "temporal")`
+	Mode    string      `@("static" | "dynamic")`
+	OpenP   struct{}    `"("`
+	Body    *parsedExpr `@@`
+	CloseP  struct{}    `")"`
+}
+
+// parsedExpr matches: <pipeline> ( "<*>" <pipeline> )*
+// One pipeline ⇒ sequential; two or more ⇒ a parallel fan-out. Used by
+// both the block body and any parenthesized group, so the block's OWN
+// parens can wrap a parallel — memory static ( a <*> b ) — matching the
+// original internal/agentscript grammar.
+type parsedExpr struct {
+	First    *parsedPipeline   `@@`
+	Branches []*parsedPipeline `( "<*>" @@ )*`
 }
 
 // parsedPipeline matches: <stage> ( ">=>" <stage> )*
@@ -100,19 +110,17 @@ type parsedPipeline struct {
 }
 
 // parsedStage is one element of a pipeline: either a call or a
-// parenthesized group (which may be a parallel fan-out).
+// parenthesized group (which is itself an expr, so it may be parallel).
 type parsedStage struct {
 	Group *parsedGroup `  @@`
 	Call  *parsedCall  `| @@`
 }
 
-// parsedGroup matches: "(" <pipeline> ( "<*>" <pipeline> )* ")"
-// One branch ⇒ grouping; two or more ⇒ parallel fan-out.
+// parsedGroup matches: "(" <expr> ")"
 type parsedGroup struct {
-	Open     struct{}          `"("`
-	First    *parsedPipeline   `@@`
-	Branches []*parsedPipeline `( "<*>" @@ )*`
-	Close    struct{}          `")"`
+	Open  struct{}    `"("`
+	Expr  *parsedExpr `@@`
+	Close struct{}    `")"`
 }
 
 // parsedCall matches: <ident> <string>*
@@ -177,7 +185,7 @@ func blockToAST(pb *parsedBlock) (ast.Block, error) {
 	if err != nil {
 		return ast.Block{}, err
 	}
-	body, err := pipelineToAST(pb.Body)
+	body, err := exprToAST(pb.Body)
 	if err != nil {
 		return ast.Block{}, err
 	}
@@ -210,9 +218,40 @@ func parseMode(s string) (ast.Mode, error) {
 
 // pipelineToAST always produces a Pipeline node, even for a single
 // call. That uniformity simplifies the resolver and lowering passes.
+// exprToAST converts a parsedExpr (a "<*>"-separated list of pipelines).
+// One pipeline ⇒ that pipeline; two or more ⇒ an ast.Parallel of the
+// pipelines, wrapped in a one-stage Pipeline so a Block.Body is always an
+// ast.Pipeline (the invariant Lower and the memory bridge rely on). This
+// is what lets the block's own parens wrap a parallel:
+// memory static ( a <*> b ).
+func exprToAST(pe *parsedExpr) (ast.Node, error) {
+	if pe == nil || pe.First == nil {
+		return nil, fmt.Errorf("empty expression")
+	}
+	if len(pe.Branches) == 0 {
+		return pipelineToAST(pe.First) // sequential — already an ast.Pipeline
+	}
+	branches := make([]ast.Node, 0, 1+len(pe.Branches))
+	first, err := pipelineToAST(pe.First)
+	if err != nil {
+		return nil, fmt.Errorf("branch 0: %w", err)
+	}
+	branches = append(branches, first)
+	for i, pp := range pe.Branches {
+		b, err := pipelineToAST(pp)
+		if err != nil {
+			return nil, fmt.Errorf("branch %d: %w", i+1, err)
+		}
+		branches = append(branches, b)
+	}
+	return ast.Pipeline{Stages: []ast.Node{ast.Parallel{Branches: branches}}}, nil
+}
+
+// pipelineToAST converts a sequential pipeline of stages. Always returns
+// an ast.Pipeline (even single-stage) to keep the body shape uniform.
 func pipelineToAST(pp *parsedPipeline) (ast.Node, error) {
 	if pp == nil || pp.First == nil {
-		return nil, fmt.Errorf("empty block body")
+		return nil, fmt.Errorf("empty pipeline")
 	}
 	stages := make([]ast.Node, 0, 1+len(pp.Rest))
 	first, err := stageToAST(pp.First)
@@ -230,8 +269,8 @@ func pipelineToAST(pp *parsedPipeline) (ast.Node, error) {
 	return ast.Pipeline{Stages: stages}, nil
 }
 
-// stageToAST converts one pipeline stage — either a call or a
-// parenthesized group — into an AST node.
+// stageToAST converts one pipeline stage — a call or a parenthesized
+// group (which is itself an expr, possibly parallel).
 func stageToAST(ps *parsedStage) (ast.Node, error) {
 	switch {
 	case ps == nil:
@@ -245,31 +284,25 @@ func stageToAST(ps *parsedStage) (ast.Node, error) {
 	}
 }
 
-// groupToAST converts a parenthesized group. One inner pipeline ⇒ just
-// that pipeline (grouping/precedence). Two or more "<*>"-separated
-// pipelines ⇒ a Parallel fan-out whose branches are those pipelines.
+// groupToAST converts a parenthesized group "(" expr ")". Inside a group
+// a Parallel is a legitimate stage, so a group wrapping a parallel expr
+// yields the ast.Parallel directly (unwrapping the one-stage Pipeline
+// that exprToAST adds for the body invariant). A sequential group yields
+// its Pipeline node (grouping/precedence).
 func groupToAST(pg *parsedGroup) (ast.Node, error) {
-	if pg == nil || pg.First == nil {
+	if pg == nil || pg.Expr == nil {
 		return nil, fmt.Errorf("empty group")
 	}
-	first, err := pipelineToAST(pg.First)
+	node, err := exprToAST(pg.Expr)
 	if err != nil {
-		return nil, fmt.Errorf("group branch 0: %w", err)
+		return nil, err
 	}
-	if len(pg.Branches) == 0 {
-		// Pure grouping — unwrap to the inner pipeline node.
-		return first, nil
-	}
-	branches := make([]ast.Node, 0, 1+len(pg.Branches))
-	branches = append(branches, first)
-	for i, pb := range pg.Branches {
-		b, err := pipelineToAST(pb)
-		if err != nil {
-			return nil, fmt.Errorf("group branch %d: %w", i+1, err)
+	if p, ok := node.(ast.Pipeline); ok && len(p.Stages) == 1 {
+		if _, isPar := p.Stages[0].(ast.Parallel); isPar {
+			return p.Stages[0], nil
 		}
-		branches = append(branches, b)
 	}
-	return ast.Parallel{Branches: branches}, nil
+	return node, nil
 }
 
 func callToAST(pc *parsedCall) (ast.Node, error) {
