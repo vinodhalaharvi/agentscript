@@ -69,25 +69,41 @@ func BuildPrompt(reg *registry.Registry) string {
 	return `You translate a user's request into a small pipeline language called AgentScript. Output ONLY the AgentScript program — no prose, no explanation, no code fences.
 
 GRAMMAR
-A program is a single block:
-  temporal static ( <pipeline> )
+A program is a single block that names an execution backend:
+  memory static ( <pipeline> )      ← runs in-process, immediately
+  temporal static ( <pipeline> )    ← runs as a durable workflow
 A pipeline is one or more commands joined by >=> (sequential, left output feeds right):
   command "arg" >=> command "arg" >=> command
 Parallel fan-out exists as <*> inside parentheses, but use it ONLY when the request is an explicit, unambiguous flat list of independent things to do at once. When in doubt, use sequential >=> .
+
+CHOOSING THE BACKEND
+- Use ` + "`memory`" + ` by DEFAULT — for research, summarizing, reading files, asking questions, analysis, and almost everything. It runs the full command set immediately.
+- Use ` + "`temporal`" + ` ONLY when the user explicitly asks for a durable, long-running, scheduled, or background workflow. Currently only the ` + "`echo`" + ` command runs on temporal.
+- If the user says "in memory", "locally", "quickly", or doesn't mention durability, use ` + "`memory`" + `.
 
 AVAILABLE COMMANDS (you may use ONLY these — never invent a command):
   ` + available + `
 
 RULES
-1. Output exactly one block: temporal static ( ... ). Nothing else.
-2. Use only commands from the AVAILABLE COMMANDS list. If the request needs a command that does not exist, choose the closest available command; do not invent names.
-3. Prefer sequential >=> . Use <*> only for a clear list of independent parallel actions.
-4. String arguments are double-quoted. Pass the user's intent as the argument text.
-5. Keep it minimal — the smallest pipeline that satisfies the request.
+1. Output exactly one block: ` + "`memory static ( ... )`" + ` or ` + "`temporal static ( ... )`" + `. Nothing else.
+2. Default to the memory backend unless durability is explicitly requested.
+3. Use only commands from the AVAILABLE COMMANDS list. If the request needs a command that does not exist, choose the closest available command; do not invent names.
+4. Prefer sequential >=> . Use <*> only for a clear list of independent parallel actions.
+5. String arguments are double-quoted. Pass the user's intent as the argument text.
+6. Keep it minimal — the smallest pipeline that satisfies the request.
 
-EXAMPLE
+EXAMPLES
+Request: summarize this article about climate policy
+Output: memory static ( summarize "this article about climate policy" )
+
+Request: research Google and Microsoft strengths, then tell me who is winning
+Output: memory static ( ( search "Google strengths" >=> analyze "strengths" <*> search "Microsoft strengths" >=> analyze "strengths" ) >=> merge >=> ask "who is winning?" )
+
 Request: say hello to the team
-Output: temporal static ( echo "hello to the team" )`
+Output: memory static ( echo "hello to the team" )
+
+Request: run a durable workflow that echoes hello
+Output: temporal static ( echo "hello" )`
 }
 
 // cleanDSL strips common LLM wrapping (code fences, leading/trailing
