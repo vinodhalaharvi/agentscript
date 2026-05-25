@@ -431,7 +431,18 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 	case "search":
 		result, err = r.search(ctx, cmd.Arg)
 	case "summarize":
-		result, err = r.geminiCall(ctx, "Summarize the following content concisely:\n\n"+input)
+		// Content comes from piped input (stdin) or, if none, the arg —
+		// like echo. Keeps the pipeline stdin->stdout portable while also
+		// allowing `summarize "text"` directly.
+		content := input
+		if content == "" {
+			content = cmd.Arg
+		}
+		if content == "" {
+			err = fmt.Errorf("summarize: no content (pipe text in or pass it as an argument)")
+		} else {
+			result, err = r.geminiCall(ctx, "Summarize the following content concisely:\n\n"+content)
+		}
 	case "ask":
 		prompt := cmd.Arg
 		if input != "" {
@@ -445,11 +456,16 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 		}
 		result, err = r.claudeCall(ctx, prompt)
 	case "analyze":
+		// Content from piped input (stdin); if none, treat the arg as the
+		// content rather than only the focus — echo-like dual source.
 		prompt := "Analyze the following"
-		if cmd.Arg != "" {
+		content := input
+		if content == "" && cmd.Arg != "" {
+			content = cmd.Arg
+		} else if cmd.Arg != "" {
 			prompt += " focusing on " + cmd.Arg
 		}
-		prompt += ":\n\n" + input
+		prompt += ":\n\n" + content
 		result, err = r.geminiCall(ctx, prompt)
 	case "save":
 		result, err = r.save(cmd.Arg, input)
