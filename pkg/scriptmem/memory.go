@@ -27,6 +27,7 @@ import (
 // always has).
 type MemoryConfig struct {
 	GeminiAPIKey       string
+	LLMBackend         string // default LLM: claude-code (default) | gemini | claude
 	ClaudeAPIKey       string
 	SearchAPIKey       string
 	Model              string
@@ -58,6 +59,7 @@ func RunMemory(ctx context.Context, cfg MemoryConfig, r resolved.AST) (string, e
 
 	rt, err := agentscript.NewRuntime(ctx, agentscript.RuntimeConfig{
 		GeminiAPIKey:       cfg.GeminiAPIKey,
+		LLMBackend:         cfg.LLMBackend,
 		ClaudeAPIKey:       cfg.ClaudeAPIKey,
 		SearchAPIKey:       cfg.SearchAPIKey,
 		Model:              cfg.Model,
