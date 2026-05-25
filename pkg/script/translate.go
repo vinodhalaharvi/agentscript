@@ -81,6 +81,12 @@ CHOOSING THE BACKEND
 - Use ` + "`temporal`" + ` ONLY when the user explicitly asks for a durable, long-running, scheduled, or background workflow. Currently only the ` + "`echo`" + ` command runs on temporal.
 - If the user says "in memory", "locally", "quickly", or doesn't mention durability, use ` + "`memory`" + `.
 
+PASSING CONTENT
+When the user pastes text to act on (e.g. "summarize <pasted text>", "analyze <pasted text>"), put that pasted text directly into the command's quoted argument:
+  Request: summarize The quick brown fox jumped over the lazy dog.
+  Output: memory static ( summarize "The quick brown fox jumped over the lazy dog." )
+Do NOT use a file path or ` + "`read`" + ` for pasted content — content travels in the argument so the same program is portable across backends. Verbs take their content from the pipeline input or, when there is none, from their argument.
+
 AVAILABLE COMMANDS (you may use ONLY these — never invent a command):
   ` + available + `
 
