@@ -37,6 +37,7 @@ type Runtime struct {
 	google    *google.GoogleClient
 	github    *aggithub.GitHubClient
 	claude    *claude.ClaudeClient
+	llm       llmChatter
 	mcp       *mcp.MCPClient
 	hf        *huggingface.HuggingFaceClient
 	crypto    *agcrypto.CryptoClient
@@ -67,6 +68,12 @@ type RuntimeConfig struct {
 	GitHubClientID     string
 	GitHubClientSecret string
 	GitHubTokenFile    string
+	// LLMBackend selects the default LLM for verbs like summarize, ask,
+	// analyze, and the search fallback. Values: "claude-code" (default —
+	// the `claude` CLI subprocess, no API key), "gemini" (requires
+	// GeminiAPIKey), "claude" (Anthropic API, requires ClaudeAPIKey).
+	// Empty defaults to claude-code.
+	LLMBackend string
 }
 
 // NewRuntime creates a new Runtime instance
@@ -79,6 +86,28 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 	var claudeClient *claude.ClaudeClient
 	if cfg.ClaudeAPIKey != "" {
 		claudeClient = claude.NewClaudeClient(cfg.ClaudeAPIKey)
+	}
+
+	// Default LLM for verb completions. Claude Code (the `claude` CLI, no
+	// API key) is the default, keeping the runtime consistent with the
+	// rest of the stack. "gemini"/"claude" select the API-key clients.
+	var defaultLLM llmChatter
+	switch cfg.LLMBackend {
+	case "gemini":
+		if geminiClient != nil {
+			defaultLLM = geminiChatAdapter{geminiClient}
+		}
+	case "claude":
+		if claudeClient != nil {
+			defaultLLM = claudeClient
+		}
+	case "", "claude-code", "claudecode":
+		defaultLLM = claude.NewClaudeCodeClient("", cfg.Model)
+	}
+	// Fallback: if a backend was named but its client wasn't available,
+	// fall back to Claude Code so verbs still work without a key.
+	if defaultLLM == nil {
+		defaultLLM = claude.NewClaudeCodeClient("", cfg.Model)
 	}
 
 	var googleClient *google.GoogleClient
@@ -115,6 +144,7 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 		google:    googleClient,
 		github:    githubClient,
 		claude:    claudeClient,
+		llm:       defaultLLM,
 		mcp:       mcp.NewMCPClient(),
 		hf:        huggingface.NewHuggingFaceClient(cfg.Verbose),
 		crypto:    agcrypto.NewCryptoClient(cfg.Verbose),
@@ -534,10 +564,34 @@ func (r *Runtime) executeCommand(ctx context.Context, cmd *Command, input string
 	return result, nil
 }
 
-// geminiCall makes a call to the Gemini API
+// llmChatter is the minimal LLM seam: a single-prompt completion. Both
+// the Gemini client (via an adapter), the Anthropic API client, and the
+// Claude Code CLI client satisfy it.
+type llmChatter interface {
+	Chat(ctx context.Context, prompt string) (string, error)
+}
+
+// geminiChatAdapter adapts the Gemini client's GenerateContent to the
+// llmChatter Chat shape, so "gemini" can be selected as the default LLM.
+type geminiChatAdapter struct{ c *gemini.GeminiClient }
+
+func (a geminiChatAdapter) Chat(ctx context.Context, prompt string) (string, error) {
+	return a.c.GenerateContent(ctx, prompt)
+}
+
+// geminiCall is the historical name for "run this prompt through the
+// default LLM". It now routes to r.llm (Claude Code by default), keeping
+// every verb that called it (summarize, ask, analyze, search fallback)
+// on the configured backend with no per-verb change. The real Gemini
+// client is still used when LLMBackend=="gemini" (r.llm is then gemini).
+// If no default LLM is set for some reason, it falls back to the raw
+// Gemini client so existing GEMINI_API_KEY setups keep working.
 func (r *Runtime) geminiCall(ctx context.Context, prompt string) (string, error) {
+	if r.llm != nil {
+		return r.llm.Chat(ctx, prompt)
+	}
 	if r.gemini == nil {
-		return "", fmt.Errorf("GEMINI_API_KEY not set - required for this command")
+		return "", fmt.Errorf("no LLM configured (set up Claude Code, or GEMINI_API_KEY)")
 	}
 	return r.gemini.GenerateContent(ctx, prompt)
 }

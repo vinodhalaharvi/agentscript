@@ -18,6 +18,7 @@ func main() {
 	natural := flag.Bool("n", false, "Natural language mode (translates input to DSL)")
 	script := flag.String("e", "", "Execute DSL script directly")
 	file := flag.String("f", "", "Execute DSL script from file")
+	llmBackend := flag.String("llm", "claude-code", "default LLM backend: claude-code | gemini | claude")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -32,17 +33,19 @@ func main() {
 		}
 	}
 
-	// Only require API key for modes that need it
-	if (*natural || *interactive) && geminiKey == "" {
-		fmt.Fprintln(os.Stderr, "Error: GEMINI_API_KEY environment variable required for natural language / interactive mode")
+	// A key is only required when the selected backend needs one.
+	// claude-code (the default) uses the local `claude` CLI — no key.
+	if *llmBackend == "gemini" && geminiKey == "" {
+		fmt.Fprintln(os.Stderr, "Error: GEMINI_API_KEY required for -llm=gemini")
 		os.Exit(1)
 	}
 
 	// Create runtime
 	rt, err := agentscript.NewRuntime(ctx, agentscript.RuntimeConfig{
 		GeminiAPIKey:       geminiKey,
-		ClaudeAPIKey:       os.Getenv("CLAUDE_API_KEY"),
+		ClaudeAPIKey:       coalesce(os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("CLAUDE_API_KEY")),
 		SearchAPIKey:       coalesce(os.Getenv("SEARCH_API_KEY"), os.Getenv("SERPAPI_KEY")),
+		LLMBackend:         *llmBackend,
 		GoogleCredsFile:    googleCreds,
 		GoogleTokenFile:    os.Getenv("GOOGLE_TOKEN_FILE"),
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
