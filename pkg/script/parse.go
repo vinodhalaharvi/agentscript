@@ -62,18 +62,22 @@ func (e ParseError) Unwrap() error { return e.Err }
 
 // === Participle grammar ====================================================
 //
-// The grammar is intentionally minimal for the MVP:
+// The grammar supports sequential pipelines and parenthesized parallel
+// fan-out, matching the original internal/agentscript grammar:
 //
-//	script   = block+
-//	block    = backend mode "(" expression ")"
-//	backend  = "memory" | "temporal"
-//	mode     = "static" | "dynamic"
-//	expression = pipeline
-//	pipeline = call ( ">=>" call )*
-//	call     = IDENT ( STRING )*
+//	script     = block+
+//	block      = backend mode "(" pipeline ")"
+//	backend    = "memory" | "temporal"
+//	mode       = "static" | "dynamic"
+//	pipeline   = stage ( ">=>" stage )*
+//	stage      = call | group
+//	group      = "(" pipeline ( "<*>" pipeline )* ")"
+//	call       = IDENT ( STRING )*
 //
-// Parallel ("<*>") is intentionally NOT in the MVP grammar — the AST
-// can represent it but the parser won't produce it yet.
+// A group with one inner pipeline is just grouping/precedence; a group
+// with two or more "<*>"-separated pipelines is a parallel fan-out. This
+// lets ( a <*> b ) >=> merge and arbitrary nesting parse, exactly as the
+// original runtime grammar did.
 
 // parsedScript is the participle-level root.
 type parsedScript struct {
@@ -89,20 +93,32 @@ type parsedBlock struct {
 	CloseP  struct{}        `")"`
 }
 
-// parsedPipeline matches: <call> ( ">=>" <call> )*
-//
-// Note: this only supports pipelines of calls in the MVP. Once Parallel
-// and grouping syntax are added, this becomes a more general expression
-// production.
+// parsedPipeline matches: <stage> ( ">=>" <stage> )*
 type parsedPipeline struct {
-	First *parsedCall   `@@`
-	Rest  []*parsedCall `( ">=>" @@ )*`
+	First *parsedStage   `@@`
+	Rest  []*parsedStage `( ">=>" @@ )*`
+}
+
+// parsedStage is one element of a pipeline: either a call or a
+// parenthesized group (which may be a parallel fan-out).
+type parsedStage struct {
+	Group *parsedGroup `  @@`
+	Call  *parsedCall  `| @@`
+}
+
+// parsedGroup matches: "(" <pipeline> ( "<*>" <pipeline> )* ")"
+// One branch ⇒ grouping; two or more ⇒ parallel fan-out.
+type parsedGroup struct {
+	Open     struct{}          `"("`
+	First    *parsedPipeline   `@@`
+	Branches []*parsedPipeline `( "<*>" @@ )*`
+	Close    struct{}          `")"`
 }
 
 // parsedCall matches: <ident> <string>*
 //
 // Identifier is anything matching the Ident token; arguments are
-// double-quoted strings. The MVP accepts zero or more string args; the
+// double-quoted strings. The parser accepts zero or more string args; the
 // resolver enforces arity later.
 type parsedCall struct {
 	Name string   `@Ident`
@@ -110,12 +126,13 @@ type parsedCall struct {
 }
 
 // scriptLexer defines tokens. Order matters: longer/more-specific
-// tokens come first so they beat shorter prefixes (e.g. ">=>" wins
-// against ">" if we ever add it).
+// tokens come first so they beat shorter prefixes (e.g. ">=>" and "<*>"
+// win against single-char punctuation).
 var scriptLexer = lexer.MustSimple([]lexer.SimpleRule{
 	{Name: "Comment", Pattern: `//[^\n]*`},
 	{Name: "Whitespace", Pattern: `[ \t\r\n]+`},
 	{Name: "Arrow", Pattern: `>=>`},
+	{Name: "Fanout", Pattern: `<\*>`},
 	{Name: "Punct", Pattern: `[()]`},
 	{Name: "String", Pattern: `"[^"]*"`},
 	{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`},
@@ -198,19 +215,61 @@ func pipelineToAST(pp *parsedPipeline) (ast.Node, error) {
 		return nil, fmt.Errorf("empty block body")
 	}
 	stages := make([]ast.Node, 0, 1+len(pp.Rest))
-	first, err := callToAST(pp.First)
+	first, err := stageToAST(pp.First)
 	if err != nil {
 		return nil, fmt.Errorf("stage 0: %w", err)
 	}
 	stages = append(stages, first)
-	for i, pc := range pp.Rest {
-		c, err := callToAST(pc)
+	for i, ps := range pp.Rest {
+		s, err := stageToAST(ps)
 		if err != nil {
 			return nil, fmt.Errorf("stage %d: %w", i+1, err)
 		}
-		stages = append(stages, c)
+		stages = append(stages, s)
 	}
 	return ast.Pipeline{Stages: stages}, nil
+}
+
+// stageToAST converts one pipeline stage — either a call or a
+// parenthesized group — into an AST node.
+func stageToAST(ps *parsedStage) (ast.Node, error) {
+	switch {
+	case ps == nil:
+		return nil, fmt.Errorf("nil stage")
+	case ps.Group != nil:
+		return groupToAST(ps.Group)
+	case ps.Call != nil:
+		return callToAST(ps.Call)
+	default:
+		return nil, fmt.Errorf("empty stage")
+	}
+}
+
+// groupToAST converts a parenthesized group. One inner pipeline ⇒ just
+// that pipeline (grouping/precedence). Two or more "<*>"-separated
+// pipelines ⇒ a Parallel fan-out whose branches are those pipelines.
+func groupToAST(pg *parsedGroup) (ast.Node, error) {
+	if pg == nil || pg.First == nil {
+		return nil, fmt.Errorf("empty group")
+	}
+	first, err := pipelineToAST(pg.First)
+	if err != nil {
+		return nil, fmt.Errorf("group branch 0: %w", err)
+	}
+	if len(pg.Branches) == 0 {
+		// Pure grouping — unwrap to the inner pipeline node.
+		return first, nil
+	}
+	branches := make([]ast.Node, 0, 1+len(pg.Branches))
+	branches = append(branches, first)
+	for i, pb := range pg.Branches {
+		b, err := pipelineToAST(pb)
+		if err != nil {
+			return nil, fmt.Errorf("group branch %d: %w", i+1, err)
+		}
+		branches = append(branches, b)
+	}
+	return ast.Parallel{Branches: branches}, nil
 }
 
 func callToAST(pc *parsedCall) (ast.Node, error) {
