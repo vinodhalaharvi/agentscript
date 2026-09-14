@@ -1,4 +1,4 @@
-# AgentScript Makefile — Morpheus DSL frontend
+# AgentScript Makefile
 
 # Load .env file if it exists
 ifneq (,$(wildcard .env))
@@ -6,93 +6,134 @@ ifneq (,$(wildcard .env))
     export
 endif
 
-# Binary name
 BINARY=agentscript
 
-# Build the binary
+.DEFAULT_GOAL := help
+
+# === Build and check =======================================================
+
 build:
 	go build -o $(BINARY) ./cmd/agentscript/
 
-# Run tests
-test: build
-	./$(BINARY) -e 'list "."'
+test:
+	go test ./...
 
-# Run with expression (Morpheus DSL syntax)
+vet:
+	go vet ./...
+
+fmt:
+	gofmt -l .
+
+# Everything CI runs, in one target.
+check: fmt vet test
+
+# === Running programs ======================================================
+
+# The file is a positional argument; -e takes program text. There is no
+# -f, -i or -n: the REPL and natural-language modes went with the legacy
+# CLI when the two binaries collapsed into one.
 run: build
 	./$(BINARY) -e '$(EXPR)'
 
-# Run file
 run-file: build
-	./$(BINARY) -f $(FILE)
+	./$(BINARY) $(FILE)
 
-# Interactive REPL
-repl: build
-	./$(BINARY) -i
+# Compile a temporal program and print its Plan as JSON. Needs no
+# Temporal cluster and no worker, which makes it the quickest way to see
+# what the front end produced.
+dry-run: build
+	./$(BINARY) --dry-run $(FILE)
 
-# Natural language mode
-natural: build
-	./$(BINARY) -n "$(QUERY)"
+# === Examples ==============================================================
 
-# Run examples
-example-simple: build
-	./$(BINARY) -f examples/simple-research.as
+# hello is the only example that runs with no credentials and no
+# infrastructure; the rest need API keys, and durable-echo needs a
+# Temporal cluster plus a Sibyl worker on the sibyl-agents queue.
+example-hello: build
+	./$(BINARY) examples/hello.as
 
-example-parallel: build
-	./$(BINARY) -f examples/competitor-analysis.as
+example-pipeline: build
+	./$(BINARY) examples/research.as
+
+example-fanout: build
+	./$(BINARY) examples/tech-digest.as
 
 example-nested: build
-	./$(BINARY) -f examples/nested-parallel.as
+	./$(BINARY) examples/framework-compare.as
 
-example-multimodal: build
-	./$(BINARY) -f examples/multimodal.as
+example-mcp: build
+	./$(BINARY) examples/mcp-issues.as
 
-# Clean build artifacts
+# Compiles without infrastructure; drop --dry-run once a worker is up.
+example-durable: build
+	./$(BINARY) --dry-run examples/durable-echo.as
+
+# Parse every example without running any of them. --dry-run stops
+# before execution, and a parse failure is the only error that can
+# mention the Parse phase, so grepping for it separates "bad syntax"
+# from "this example needs credentials".
+examples: build
+	@fail=0; for f in examples/*.as; do \
+		printf '%-32s ' "$$f"; \
+		if ./$(BINARY) --dry-run "$$f" 2>&1 | grep -q 'script.Parse'; then \
+			echo "PARSE FAILED"; fail=1; \
+		else \
+			echo ok; \
+		fi; \
+	done; exit $$fail
+
+# === Housekeeping ==========================================================
+
 clean:
 	rm -f $(BINARY)
-	rm -f *.md *.png *.mp4
 
-# Install dependencies
 deps:
 	go mod tidy
 
-# Show help
 help:
-	@echo "AgentScript — AI Agent Orchestration DSL (Morpheus frontend)"
+	@echo "AgentScript — AI agent orchestration in s-expressions"
 	@echo ""
 	@echo "Setup:"
-	@echo "  1. Create .env file with: GEMINI_API_KEY=your-key"
-	@echo "  2. Run: make build"
+	@echo "  1. Create .env with the keys the verbs you use need, e.g. GEMINI_API_KEY"
+	@echo "  2. make build"
 	@echo ""
-	@echo "Targets:"
-	@echo "  make build          - Build the binary"
-	@echo "  make test           - Build and run simple test"
-	@echo "  make repl           - Start interactive REPL"
-	@echo "  make run EXPR='...' - Run DSL expression"
-	@echo "  make run-file FILE=examples/simple-research.as"
-	@echo "  make natural QUERY='compare google and microsoft'"
-	@echo "  make example-simple   - Run simple example"
-	@echo "  make example-parallel - Run parallel example"
-	@echo "  make example-nested   - Run nested parallel example"
-	@echo "  make clean          - Remove build artifacts"
-	@echo "  make deps           - Install dependencies"
+	@echo "Build and check:"
+	@echo "  make build              Build the binary"
+	@echo "  make test               go test ./..."
+	@echo "  make vet                go vet ./..."
+	@echo "  make fmt                List files needing gofmt"
+	@echo "  make check              fmt + vet + test"
 	@echo ""
-	@echo "Morpheus DSL Syntax:"
-	@echo "  Sequential  : search \"golang\" >=> summarize >=> save \"out.md\""
-	@echo "  Fan-out     : ( search \"AWS\" >=> analyze <*> search \"GCP\" >=> analyze ) >=> merge"
-	@echo "  Nested      : ( ( a <*> b ) >=> merge >=> ask \"...\" <*> c ) >=> merge"
+	@echo "Run:"
+	@echo "  make run EXPR='(pipe (search \"go\") summarize)'"
+	@echo "  make run-file FILE=examples/tech-digest.as"
+	@echo "  make dry-run FILE=examples/durable-echo.as"
 	@echo ""
-	@echo "Operators:"
-	@echo "  >=>   Kleisli composition — sequential pipeline stage"
-	@echo "  <*>   Fan-out — run branches concurrently (inside parentheses)"
-	@echo "  ( )   Group  — enclose a fan-out block"
+	@echo "Examples:"
+	@echo "  make example-hello      exec, no credentials needed"
+	@echo "  make example-pipeline   (pipe ...)"
+	@echo "  make example-fanout     (par ...) + merge"
+	@echo "  make example-nested     nested fan-out"
+	@echo "  make example-mcp        MCP server tools"
+	@echo "  make example-durable    temporal backend, compiled not run"
+	@echo "  make examples           Parse every example"
+	@echo ""
+	@echo "Syntax:"
+	@echo "  Sequential : (pipe (search \"golang\") summarize (save \"out.md\"))"
+	@echo "  Fan-out    : (pipe (par (search \"AWS\") (search \"GCP\")) merge)"
+	@echo "  Conditional: (pipe (stock \"NVDA\") (when \"change > 5\") (notify \"slack\"))"
+	@echo "  Backend    : (block :backend temporal :mode static (echo \"hi\"))"
+	@echo ""
+	@echo "Forms:"
+	@echo "  (pipe a b c)   each stage's output feeds the next"
+	@echo "  (par a b c)    branches run concurrently on the same input"
+	@echo "  (block ...)    optional wrapper; defaults to :backend memory :mode static"
+	@echo ""
+	@echo "Running a temporal program needs a Temporal cluster and a Sibyl"
+	@echo "worker on the sibyl-agents queue:"
+	@echo "  temporal server start-dev"
+	@echo "  go run ./cmd/worker          # from your sibyl checkout"
 
-# Upload to a new private GitHub repo (requires: gh auth login)
-git-upload:
-	@if [ ! -d .git ]; then \
-		git init && \
-		git add . && \
-		git commit -m "Initial commit — AgentScript with Morpheus DSL frontend"; \
-	fi
-	gh repo create agentscript-mcp-tools --private --source=. --remote=origin --push
-
-.PHONY: build test run run-file repl natural example-simple example-parallel example-nested example-multimodal clean deps help git-upload
+.PHONY: build test vet fmt check run run-file dry-run \
+	example-hello example-pipeline example-fanout example-nested \
+	example-mcp example-durable examples clean deps help
