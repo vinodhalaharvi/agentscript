@@ -314,7 +314,8 @@ func TestParse_AcceptsParallelForm(t *testing.T) {
 func TestParseError_WrapsUnderlying(t *testing.T) {
 	// A bare symbol is a valid program (a call with no arguments), so
 	// the malformed input here has to be structurally broken.
-	err := parseErr(t, `(pipe (echo "a"`)
+	const src = `(pipe (echo "a"`
+	err := parseErr(t, src)
 	var pe script.ParseError
 	if !errors.As(err, &pe) {
 		t.Fatalf("err = %v, want ParseError", err)
@@ -322,8 +323,8 @@ func TestParseError_WrapsUnderlying(t *testing.T) {
 	if pe.Err == nil {
 		t.Error("ParseError.Err should wrap the underlying reader error")
 	}
-	if pe.Source != "garbage" {
-		t.Errorf("ParseError.Source = %q, want garbage", pe.Source)
+	if pe.Source != src {
+		t.Errorf("ParseError.Source = %q, want %q", pe.Source, src)
 	}
 }
 

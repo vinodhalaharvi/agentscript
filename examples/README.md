@@ -33,3 +33,10 @@ never in a runtime flag, so a program always runs the same way wherever
 it is invoked from.
 
 Comments start with `;` or `//` and run to end of line.
+
+## One wrinkle
+
+`echo` is a temporal activity, not an interpreter verb. It resolves on
+either backend but only runs on temporal, so `(echo "hi")` without a
+`(block :backend temporal ...)` wrapper fails at execution rather than
+at compile time. The memory examples use `exec` instead.
