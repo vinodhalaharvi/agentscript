@@ -118,3 +118,31 @@ Request: say hello to the team
 Output: (block :backend memory :mode static (echo "hello to the team"))
 `
 }
+
+// cleanDSL strips the wrapping an LLM tends to add around code even when
+// told not to: fenced blocks, a sentence of preamble, a trailing
+// sign-off. It is lenient on purpose — a program that parses is worth
+// more than punishing the model for chattiness — and anything it fails
+// to clean up is caught by Parse a moment later.
+func cleanDSL(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		if nl := strings.IndexByte(s, '\n'); nl != -1 {
+			s = s[nl+1:]
+		}
+		s = strings.TrimSuffix(strings.TrimSpace(s), "```")
+	}
+	s = strings.TrimSpace(s)
+	// A program starts at the first '(' and ends at the last ')'.
+	// Under the operator dialect this looked for the "memory" or
+	// "temporal" keyword; s-expressions give a far simpler anchor,
+	// and one that also holds for a program with no (block ...)
+	// wrapper.
+	if i := strings.IndexByte(s, '('); i > 0 {
+		s = s[i:]
+	}
+	if j := strings.LastIndexByte(s, ')'); j != -1 && j < len(s)-1 {
+		s = s[:j+1]
+	}
+	return strings.TrimSpace(s)
+}
