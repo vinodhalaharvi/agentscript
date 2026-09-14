@@ -219,7 +219,7 @@ func TestParse_LineCommentsIgnored(t *testing.T) {
 
 func TestParse_WhitespaceFlexibility(t *testing.T) {
 	// Newlines, tabs, and runs of spaces in unusual places should all parse.
-	src := "temporal\tstatic\n(\n\techo\t\"a\"\n\t>=>\n\techo\t\"b\"\n)"
+	src := "(block\t:backend temporal\n  :mode static\n(pipe\n\t(echo\t\"a\")\n\n\t(echo   \"b\")))"
 	got := parse(t, src)
 	stages := expectPipeline(t, got.Blocks[0])
 	if len(stages) != 2 {
@@ -229,17 +229,41 @@ func TestParse_WhitespaceFlexibility(t *testing.T) {
 
 // === Error cases ===========================================================
 
-func TestParse_RejectsMissingBackend(t *testing.T) {
-	err := parseErr(t, `static ( echo )`)
-	// Participle will surface an error; we only check that ParseError wraps it.
+// Backend and mode are now keyword options rather than a mandatory
+// two-word header, so "missing" is not an error — both default, and
+// order does not matter. What must still fail is an option that is
+// unknown, valueless, or given a value outside its enum.
+
+func TestParse_DefaultsBackendAndMode(t *testing.T) {
+	got := parse(t, `(block (echo "a"))`)
+	if b := got.Blocks[0].Backend; b != ast.BackendMemory {
+		t.Errorf("backend = %v, want memory", b)
+	}
+	if m := got.Blocks[0].Mode; m != ast.ModeStatic {
+		t.Errorf("mode = %v, want static", m)
+	}
+}
+
+func TestParse_OptionOrderIsFree(t *testing.T) {
+	got := parse(t, `(block :mode dynamic :backend temporal (echo "a"))`)
+	if b := got.Blocks[0].Backend; b != ast.BackendTemporal {
+		t.Errorf("backend = %v, want temporal", b)
+	}
+	if m := got.Blocks[0].Mode; m != ast.ModeDynamic {
+		t.Errorf("mode = %v, want dynamic", m)
+	}
+}
+
+func TestParse_RejectsUnknownOption(t *testing.T) {
+	err := parseErr(t, `(block :engine memory (echo "a"))`)
 	var pe script.ParseError
 	if !errors.As(err, &pe) {
 		t.Fatalf("err = %v, want ParseError", err)
 	}
 }
 
-func TestParse_RejectsMissingMode(t *testing.T) {
-	err := parseErr(t, `temporal ( echo )`)
+func TestParse_RejectsOptionWithoutValue(t *testing.T) {
+	err := parseErr(t, `(block :backend)`)
 	var pe script.ParseError
 	if !errors.As(err, &pe) {
 		t.Fatalf("err = %v, want ParseError", err)
@@ -247,14 +271,14 @@ func TestParse_RejectsMissingMode(t *testing.T) {
 }
 
 func TestParse_RejectsUnknownBackend(t *testing.T) {
-	err := parseErr(t, `xyz static ( echo )`)
+	err := parseErr(t, `(block :backend xyz (echo "a"))`)
 	if !strings.Contains(err.Error(), "Parse") {
 		t.Errorf("err should reference Parse phase, got: %v", err)
 	}
 }
 
 func TestParse_RejectsUnknownMode(t *testing.T) {
-	err := parseErr(t, `temporal xyz ( echo )`)
+	err := parseErr(t, `(block :mode xyz (echo "a"))`)
 	if !strings.Contains(err.Error(), "Parse") {
 		t.Errorf("err should reference Parse phase, got: %v", err)
 	}
@@ -274,28 +298,23 @@ func TestParse_RejectsEmptyPipe(t *testing.T) {
 	parseErr(t, `(block :backend temporal :mode static (pipe))`)
 }
 
-func TestParse_AcceptsParallelOperator(t *testing.T) {
-	// <*> parallel fan-out is now part of the grammar (parity with the
-	// original internal/agentscript grammar). It must parse.
+func TestParse_AcceptsParallelForm(t *testing.T) {
+	// par fan-out is part of the grammar (parity with the original
+	// internal/agentscript grammar). It must parse.
 	if _, err := script.Parse(context.Background(), script.Source(`(block :backend temporal :mode static
 	  (par
 	    (echo "a")
 	    (echo "b")))`)); err != nil {
-		t.Errorf("parallel <*> should parse now: %v", err)
+		t.Errorf("par should parse: %v", err)
 	}
-}
-
-// === Order: backend must precede mode ======================================
-
-func TestParse_RejectsModeBeforeBackend(t *testing.T) {
-	// Grammar enforces <backend> <mode>; reversed order must fail.
-	parseErr(t, `static temporal ( echo )`)
 }
 
 // === ParseError shape ======================================================
 
 func TestParseError_WrapsUnderlying(t *testing.T) {
-	err := parseErr(t, `garbage`)
+	// A bare symbol is a valid program (a call with no arguments), so
+	// the malformed input here has to be structurally broken.
+	err := parseErr(t, `(pipe (echo "a"`)
 	var pe script.ParseError
 	if !errors.As(err, &pe) {
 		t.Fatalf("err = %v, want ParseError", err)

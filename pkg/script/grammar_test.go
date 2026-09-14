@@ -39,8 +39,8 @@ func TestGrammar_DescribesOperatorsAndBackends(t *testing.T) {
 	for _, op := range g.Operators {
 		syms[op.Symbol] = true
 	}
-	if !syms[">=>"] || !syms["<*>"] {
-		t.Errorf("operators should include >=> and <*>, got %v", syms)
+	if !syms["pipe"] || !syms["par"] {
+		t.Errorf("operators should include pipe and par, got %v", syms)
 	}
 	if len(g.Backends) != 2 {
 		t.Errorf("expected memory+temporal backends, got %v", g.Backends)

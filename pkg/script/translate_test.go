@@ -19,12 +19,17 @@ func TestBuildPrompt_ListsBuiltins(t *testing.T) {
 	if !strings.Contains(p, "echo") {
 		t.Error("prompt should list the echo builtin")
 	}
-	if !strings.Contains(p, ">=>") {
-		t.Error("prompt should describe the >=> sequential operator")
+	if !strings.Contains(p, "(pipe") {
+		t.Error("prompt should describe the pipe form")
 	}
-	// Must NOT teach the old grammar.
-	if strings.Contains(p, "->") && !strings.Contains(p, ">=>") {
-		t.Error("prompt should not use the legacy -> pipe")
+	if !strings.Contains(p, "(par") {
+		t.Error("prompt should describe the par form")
+	}
+	// Must NOT teach either retired dialect.
+	for _, old := range []string{">=>", "<*>"} {
+		if strings.Contains(p, old) {
+			t.Errorf("prompt should not teach the retired %q operator", old)
+		}
 	}
 }
 
@@ -37,7 +42,7 @@ func TestBuildPrompt_NilRegistry(t *testing.T) {
 }
 
 func TestTranslate_StripsFences(t *testing.T) {
-	llm := stubLLM("```agentscript\ntemporal static ( echo \"hi\" )\n```")
+	llm := stubLLM("```agentscript\n(block :backend temporal :mode static (echo \"hi\"))\n```")
 	src, err := script.Translate(context.Background(), llm, script.DefaultRegistry(), "say hi")
 	if err != nil {
 		t.Fatalf("Translate: %v", err)
@@ -45,18 +50,18 @@ func TestTranslate_StripsFences(t *testing.T) {
 	if strings.Contains(string(src), "```") {
 		t.Errorf("fences not stripped: %q", src)
 	}
-	if !strings.HasPrefix(string(src), "temporal static") {
+	if !strings.HasPrefix(string(src), "(block") {
 		t.Errorf("Source = %q, want it to start with the block", src)
 	}
 }
 
 func TestTranslate_StripsSurroundingProse(t *testing.T) {
-	llm := stubLLM("Sure! Here you go:\ntemporal static ( echo \"hi\" )\nHope that helps!")
+	llm := stubLLM("Sure! Here you go:\n(block :backend temporal :mode static (echo \"hi\"))\nHope that helps!")
 	src, err := script.Translate(context.Background(), llm, script.DefaultRegistry(), "say hi")
 	if err != nil {
 		t.Fatalf("Translate: %v", err)
 	}
-	if !strings.HasPrefix(string(src), "temporal static") {
+	if !strings.HasPrefix(string(src), "(block") {
 		t.Errorf("leading prose not stripped: %q", src)
 	}
 	if strings.Contains(string(src), "Hope that helps") {
