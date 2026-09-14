@@ -7,6 +7,7 @@ require (
 	github.com/vinodhalaharvi/sibyl v0.1.1-0.20260521024214-bfa4bcb5ee5f
 	github.com/vinodhalaharvi/weft v0.1.0
 	go.temporal.io/sdk v1.41.1
+	golang.org/x/net v0.49.0
 	golang.org/x/oauth2 v0.30.0
 	google.golang.org/api v0.197.0
 )
@@ -56,7 +57,6 @@ require (
 	go.temporal.io/api v1.62.11 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
