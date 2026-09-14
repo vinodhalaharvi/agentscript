@@ -20,7 +20,7 @@ import (
 //
 // echo with an arg returns the arg; echo with upstream input passes it
 // through (Unix-pipe). So `echo "hi"` produces "hi", and
-// `echo "hi" >=> echo` produces "hi" again at the second stage.
+// `(pipe (echo "hi") echo)` produces "hi" again at the second stage.
 func EchoSpec() registry.BuiltinSpec {
 	return registry.BuiltinSpec{
 		Name:    "echo",

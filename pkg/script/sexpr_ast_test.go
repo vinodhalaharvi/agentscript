@@ -153,45 +153,52 @@ func TestParseSExprErrors(t *testing.T) {
 	}
 }
 
-func TestParseDispatchesByDialect(t *testing.T) {
+// TestParseIsSExpr confirms Parse is now a thin alias for ParseSExpr —
+// the operator dialect is gone, so there is only one front end.
+func TestParseIsSExpr(t *testing.T) {
 	ctx := context.Background()
-	legacy, err := Parse(ctx, Source(`memory static ( search "ai" >=> summarize )`))
+	viaParse, err := Parse(ctx, Source(`(pipe (search "ai") summarize)`))
 	if err != nil {
-		t.Fatalf("Parse legacy: %v", err)
+		t.Fatalf("Parse: %v", err)
 	}
-	sexprAST, err := Parse(ctx, Source(`(pipe (search "ai") summarize)`))
+	viaSExpr, err := ParseSExpr(ctx, Source(`(pipe (search "ai") summarize)`))
 	if err != nil {
-		t.Fatalf("Parse s-expr: %v", err)
+		t.Fatalf("ParseSExpr: %v", err)
 	}
-	if !reflect.DeepEqual(legacy, sexprAST) {
-		t.Errorf("dialects disagree:\nlegacy %#v\nsexpr  %#v", legacy, sexprAST)
+	if !reflect.DeepEqual(viaParse, viaSExpr) {
+		t.Errorf("Parse and ParseSExpr disagree")
 	}
 }
 
-// TestRoundTrip is the real check on the front end: take a legacy
-// script, parse it, print it as s-expressions, reparse, and require an
-// identical AST. It doubles as the conversion tool's correctness test.
+// TestRoundTrip is the faithfulness check on the printer: parse, print,
+// reparse, require an identical AST. It covers the shapes the language
+// can express.
 func TestRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	cases := map[string]string{
-		"single call": `memory static ( summarize )`,
-		"pipeline":    `memory static ( search "ai" >=> summarize >=> email "a@b.c" )`,
-		"fanout":      `memory static ( ( rss "hn" <*> reddit "r/golang" ) >=> merge )`,
-		"body fanout": `memory static ( rss "hn" <*> reddit "r/golang" )`,
-		"temporal":    `temporal dynamic ( search "ai" >=> summarize )`,
-		"conditional": `memory static ( stock "NVDA" >=> if "change > 5" >=> notify "slack" )`,
-		"multi block": `memory static ( summarize )
-temporal static ( search "ai" >=> merge )`,
-		"nested fanout": `memory static (
-			( ( search "react" >=> analyze <*> search "vue" >=> analyze ) >=> merge
-			  <*> ( search "go" >=> analyze <*> search "rust" >=> analyze ) >=> merge
-			) >=> ask "compare" >=> save "out.md" )`,
+		"single call":  `(block :backend memory :mode static summarize)`,
+		"pipeline":     `(pipe (search "ai") summarize (email "a@b.c"))`,
+		"fanout":       `(pipe (par (rss "hn") (reddit "r/golang")) merge)`,
+		"body fanout":  `(par (rss "hn") (reddit "r/golang"))`,
+		"temporal":     `(block :backend temporal :mode dynamic (pipe (search "ai") summarize))`,
+		"sibyl alias":  `(block :backend sibyl (pipe (search "ai") merge))`,
+		"conditional":  `(pipe (stock "NVDA") (when "change > 5") (notify "slack"))`,
+		"numeric arg":  `(pipe (rss "hn") (retry 3))`,
+		"escaped args": `(ask "say \"hi\"\nthen stop")`,
+		"multi block": `(block :backend memory :mode static summarize)
+(block :backend temporal :mode static (pipe (search "ai") merge))`,
+		"nested fanout": `(pipe
+  (par
+    (pipe (par (pipe (search "react") analyze) (pipe (search "vue") analyze)) merge)
+    (pipe (par (pipe (search "go") analyze) (pipe (search "rust") analyze)) merge))
+  (ask "compare")
+  (save "out.md"))`,
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
-			original, err := Parse(ctx, Source(src))
+			original, err := ParseSExpr(ctx, Source(src))
 			if err != nil {
-				t.Fatalf("parse legacy: %v", err)
+				t.Fatalf("parse: %v", err)
 			}
 			printed, err := PrintSExpr(original)
 			if err != nil {
@@ -202,8 +209,7 @@ temporal static ( search "ai" >=> merge )`,
 				t.Fatalf("reparse:\n%s\nerror: %v", printed, err)
 			}
 			if !reflect.DeepEqual(original, reparsed) {
-				t.Errorf("round trip changed the AST\nprinted:\n%s\noriginal %#v\nreparsed %#v",
-					printed, original, reparsed)
+				t.Errorf("round trip changed the AST\nprinted:\n%s", printed)
 			}
 		})
 	}

@@ -17,7 +17,10 @@ func stubLLM(dsl string) script.CompleteFunc {
 // in-memory result. Fully testable without a runtime.
 func TestExecute_TemporalReturnsPlan(t *testing.T) {
 	g := script.Grammar()
-	llm := stubLLM(`temporal static ( echo "hi" >=> echo )`)
+	llm := stubLLM(`(block :backend temporal :mode static
+	  (pipe
+	    (echo "hi")
+	    echo))`)
 
 	out, err := scriptmem.Execute(context.Background(), llm, g, scriptmem.MemoryConfig{}, "say hi then echo")
 	if err != nil {
@@ -46,7 +49,8 @@ func TestExecute_MemoryRoutesToRuntime(t *testing.T) {
 	// the runtime will error, but the routing is what we assert: we must
 	// NOT get a temporal plan, and any error must come from the runtime
 	// (execution), not from resolution/compilation.
-	llm := stubLLM(`memory static ( hf_summarize "x" )`)
+	llm := stubLLM(`(block :backend memory :mode static
+	  (hf_summarize "x"))`)
 
 	out, err := scriptmem.Execute(context.Background(), llm, g, scriptmem.MemoryConfig{}, "summarize")
 	if err != nil {
@@ -71,8 +75,10 @@ func TestExecute_MemoryRoutesToRuntime(t *testing.T) {
 func TestExecute_UnknownVerbRejected(t *testing.T) {
 	g := script.Grammar()
 	for _, src := range []string{
-		`temporal static ( teleport "mars" )`,
-		`memory static ( teleport "mars" )`,
+		`(block :backend temporal :mode static
+		  (teleport "mars"))`,
+		`(block :backend memory :mode static
+		  (teleport "mars"))`,
 	} {
 		_, err := scriptmem.Execute(context.Background(), stubLLM(src), g, scriptmem.MemoryConfig{}, "x")
 		if err == nil {
@@ -89,7 +95,8 @@ func TestExecute_UnknownVerbRejected(t *testing.T) {
 // and never produces a plan.
 func TestExecute_HistoricalVerbOnTemporalNotImplemented(t *testing.T) {
 	g := script.Grammar()
-	llm := stubLLM(`temporal static ( hf_summarize "x" )`)
+	llm := stubLLM(`(block :backend temporal :mode static
+	  (hf_summarize "x"))`)
 	_, err := scriptmem.Execute(context.Background(), llm, g, scriptmem.MemoryConfig{}, "summarize")
 	if err == nil {
 		t.Fatal("hf_summarize on temporal should fail")

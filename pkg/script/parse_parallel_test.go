@@ -13,11 +13,36 @@ import (
 // grammar. This is the exact shape the LLM emits.
 func TestParse_ParallelForms(t *testing.T) {
 	cases := []string{
-		`memory static ( a "x" <*> b "y" )`,
-		`memory static ( a "x" <*> b "y" <*> c "z" )`,
-		`memory static ( ( a "x" <*> b "y" ) >=> merge )`,
-		`memory static ( ( a >=> b <*> c >=> d ) >=> merge >=> e "q" )`,
-		`temporal static ( echo "x" <*> echo "y" )`,
+		`(block :backend memory :mode static
+		  (par
+		    (a "x")
+		    (b "y")))`,
+		`(block :backend memory :mode static
+		  (par
+		    (a "x")
+		    (b "y")
+		    (c "z")))`,
+		`(block :backend memory :mode static
+		  (pipe
+		    (par
+		      (a "x")
+		      (b "y"))
+		    merge))`,
+		`(block :backend memory :mode static
+		  (pipe
+		    (par
+		      (pipe
+		        a
+		        b)
+		      (pipe
+		        c
+		        d))
+		    merge
+		    (e "q")))`,
+		`(block :backend temporal :mode static
+		  (par
+		    (echo "x")
+		    (echo "y")))`,
 	}
 	for _, src := range cases {
 		if _, err := script.Parse(context.Background(), script.Source(src)); err != nil {
@@ -27,7 +52,10 @@ func TestParse_ParallelForms(t *testing.T) {
 }
 
 func TestParse_BareBodyParallel(t *testing.T) {
-	a, err := script.Parse(context.Background(), script.Source(`memory static ( a "x" <*> b "y" )`))
+	a, err := script.Parse(context.Background(), script.Source(`(block :backend memory :mode static
+	  (par
+	    (a "x")
+	    (b "y")))`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -48,7 +76,10 @@ func TestParse_BareBodyParallel(t *testing.T) {
 }
 
 func TestParse_SequentialIsNotParallel(t *testing.T) {
-	a, err := script.Parse(context.Background(), script.Source(`memory static ( a "x" >=> b "y" )`))
+	a, err := script.Parse(context.Background(), script.Source(`(block :backend memory :mode static
+	  (pipe
+	    (a "x")
+	    (b "y")))`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -61,7 +92,17 @@ func TestParse_SequentialIsNotParallel(t *testing.T) {
 }
 
 func TestParse_ComplexGrammarResolves(t *testing.T) {
-	src := `memory static ( ( search "x" >=> analyze "s" <*> search "y" >=> analyze "s" ) >=> merge >=> ask "who wins?" )`
+	src := `(block :backend memory :mode static
+	  (pipe
+	    (par
+	      (pipe
+	        (search "x")
+	        (analyze "s"))
+	      (pipe
+	        (search "y")
+	        (analyze "s")))
+	    merge
+	    (ask "who wins?")))`
 	a, err := script.Parse(context.Background(), script.Source(src))
 	if err != nil {
 		t.Fatalf("parse: %v", err)

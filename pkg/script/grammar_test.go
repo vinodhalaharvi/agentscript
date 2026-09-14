@@ -50,7 +50,8 @@ func TestGrammar_DescribesOperatorsAndBackends(t *testing.T) {
 func TestGrammar_DiscoveryDrivenTranslateAndCompile(t *testing.T) {
 	g := script.Grammar()
 	llm := func(_ context.Context, _, _ string) (string, error) {
-		return `temporal static ( echo "hi" )`, nil
+		return `(block :backend temporal :mode static
+		  (echo "hi"))`, nil
 	}
 	src, err := script.TranslateGrammar(context.Background(), llm, g, "say hi")
 	if err != nil {
@@ -68,7 +69,8 @@ func TestGrammar_DiscoveryDrivenTranslateAndCompile(t *testing.T) {
 func TestGrammar_HistoricalVerbIsKnownNotUnknown(t *testing.T) {
 	g := script.Grammar()
 	llm := func(_ context.Context, _, _ string) (string, error) {
-		return `temporal static ( hf_summarize "x" )`, nil
+		return `(block :backend temporal :mode static
+		  (hf_summarize "x"))`, nil
 	}
 	src, _ := script.TranslateGrammar(context.Background(), llm, g, "summarize")
 	_, err := script.CompileGrammar(context.Background(), g, src)

@@ -5,7 +5,7 @@
 One line replaces hundreds of lines of code.
 
 ```
-search "AI trends" >=> summarize >=> email "you@gmail.com"
+(pipe (search "AI trends") summarize (email "you@gmail.com"))
 ```
 
 ## What It Does
@@ -14,18 +14,19 @@ AgentScript lets you chain Gemini AI with 100+ commands using Morpheus category-
 
 ```bash
 # Morning briefing in one command
-( weather "San Francisco"
-  <*> crypto "BTC,ETH,SOL"
-  <*> stock "AAPL,NVDA,MSFT"
-  <*> news_headlines "technology"
-  <*> rss "hn"
-  <*> reddit "r/golang"
-  <*> job_search "golang contract" "remote"
-)
->=> merge
->=> ask "morning briefing with weather, markets, headlines, and jobs"
->=> notify "slack"
->=> email "you@gmail.com"
+(pipe
+  (par
+    (weather "San Francisco")
+    (crypto "BTC,ETH,SOL")
+    (stock "AAPL,NVDA,MSFT")
+    (news_headlines "technology")
+    (rss "hn")
+    (reddit "r/golang")
+    (job_search "golang contract" "remote"))
+  merge
+  (ask "morning briefing with weather, markets, headlines, and jobs")
+  (notify "slack")
+  (email "you@gmail.com"))
 ```
 
 ## Quick Start
@@ -39,182 +40,207 @@ go build -o agentscript ./cmd/agentscript
 export GEMINI_API_KEY="your-key"
 
 # Try it
-./agentscript -e 'ask "hello world"'
-./agentscript -e 'search "golang trends" >=> summarize'
-./agentscript -e 'crypto "BTC,ETH,SOL"'
-./agentscript -e 'weather "New York"'
+./agentscript -e '(ask "hello world")'
+./agentscript -e '(pipe (search "golang trends") summarize)'
+./agentscript -e '(crypto "BTC,ETH,SOL")'
+./agentscript -e '(weather "New York")'
 ```
 
 ## The Grammar
 
+AgentScript is written as s-expressions.
+
 ```
-Program     = Statement*
-Statement   = ( "(" Parallel ")" | Command ) ( ">=>" Statement )?
-Parallel    = Statement ( "<*>" Statement )*
-Command     = Action String*
+program = form+
+form    = block | expr
+block   = "(" ("block" | "script") option* expr ")"
+option  = ":backend" ("memory" | "temporal" | "sibyl")
+        | ":mode"    ("static" | "dynamic")
+expr    = pipe | par | call | symbol
+pipe    = "(" "pipe" expr+ ")"
+par     = "(" "par" expr expr+ ")"
+call    = "(" symbol literal* ")"
+symbol  = bare identifier — a call with no arguments
 ```
 
-Two operators define the entire language:
+Two forms define the entire language:
 
-| Operator | Meaning |
-|----------|---------|
-| `>=>` | Kleisli composition — sequential pipeline stage |
-| `<*>` | Fan-out — run branches concurrently (inside parentheses) |
+| Form | Meaning |
+|------|---------|
+| `(pipe a b c)` | Kleisli composition — each stage's output feeds the next |
+| `(par a b c)` | Fan-out — branches run concurrently on the same input |
+
+The `(block ...)` wrapper is optional; without it a program runs on the
+memory backend in static mode. Backend selection lives in the source,
+never in a runtime flag, so a program always runs the same way wherever
+it is invoked from. Comments start with `;` or `//`.
 
 ## Commands
 
-AgentScript ships 100+ commands. The most common are grouped below; the full keyword list lives in `internal/agentscript/grammar.go`.
+AgentScript ships 100+ commands. The most common are grouped below; the authoritative list is the registry, reachable via `script.Grammar()`.
 
 ### Core
 | Command | Example | Description |
 |---------|---------|-------------|
-| `search` | `search "topic"` | Web search via Gemini |
-| `summarize` | `>=> summarize` | Summarize piped input |
-| `ask` | `>=> ask "question"` | Ask with context |
-| `analyze` | `>=> analyze "focus"` | Deep analysis |
-| `save` | `>=> save "file.md"` | Save to local file |
-| `read` | `read "file.txt"` | Read local file |
-| `list` | `list "."` | List directory |
-| `merge` | `>=> merge` | Merge fan-out results |
+| `search` | `(search "topic")` | Web search via Gemini |
+| `summarize` | `summarize` | Summarize piped input |
+| `ask` | `(ask "question")` | Ask with context |
+| `analyze` | `(analyze "focus")` | Deep analysis |
+| `save` | `(save "file.md")` | Save to local file |
+| `read` | `(read "file.txt")` | Read local file |
+| `list` | `(list ".")` | List directory |
+| `merge` | `merge` | Merge fan-out results |
 
 ### Data
 | Command | Example | API | Key? |
 |---------|---------|-----|------|
-| `weather` | `weather "NYC"` | Open-Meteo | **No** |
-| `crypto` | `crypto "BTC,ETH"` | CoinGecko | **No** |
-| `reddit` | `reddit "r/golang"` | Reddit JSON | **No** |
-| `rss` | `rss "hn"` | Direct HTTP | **No** |
-| `news` | `news "AI"` | GNews | Yes |
-| `news_headlines` | `news_headlines "tech"` | GNews | Yes |
-| `stock` | `stock "AAPL,NVDA"` | Finnhub | Yes |
-| `job_search` | `job_search "golang"` | SerpAPI | Yes |
-| `twitter` | `twitter "golang"` | Twitter API | Yes |
+| `weather` | `(weather "NYC")` | Open-Meteo | **No** |
+| `crypto` | `(crypto "BTC,ETH")` | CoinGecko | **No** |
+| `reddit` | `(reddit "r/golang")` | Reddit JSON | **No** |
+| `rss` | `(rss "hn")` | Direct HTTP | **No** |
+| `news` | `(news "AI")` | GNews | Yes |
+| `news_headlines` | `(news_headlines "tech")` | GNews | Yes |
+| `stock` | `(stock "AAPL,NVDA")` | Finnhub | Yes |
+| `job_search` | `(job_search "golang")` | SerpAPI | Yes |
+| `twitter` | `(twitter "golang")` | Twitter API | Yes |
 
 ### Google Workspace
 | Command | Example | API |
 |---------|---------|-----|
-| `email` | `>=> email "to@gmail.com"` | Gmail |
-| `calendar` | `>=> calendar "Meeting 2pm"` | Calendar |
-| `meet` | `>=> meet "Sprint Review"` | Calendar+Meet |
-| `drive_save` | `>=> drive_save "path/file"` | Drive |
-| `doc_create` | `>=> doc_create "Title"` | Docs |
-| `sheet_create` | `>=> sheet_create "Title"` | Sheets |
-| `sheet_append` | `>=> sheet_append "id/sheet"` | Sheets |
-| `task` | `>=> task "todo"` | Tasks |
-| `contact_find` | `contact_find "John"` | People |
-| `youtube_search` | `youtube_search "query"` | YouTube |
+| `email` | `(email "to@gmail.com")` | Gmail |
+| `calendar` | `(calendar "Meeting 2pm")` | Calendar |
+| `meet` | `(meet "Sprint Review")` | Calendar+Meet |
+| `drive_save` | `(drive_save "path/file")` | Drive |
+| `doc_create` | `(doc_create "Title")` | Docs |
+| `sheet_create` | `(sheet_create "Title")` | Sheets |
+| `sheet_append` | `(sheet_append "id/sheet")` | Sheets |
+| `task` | `(task "todo")` | Tasks |
+| `contact_find` | `(contact_find "John")` | People |
+| `youtube_search` | `(youtube_search "query")` | YouTube |
 
 ### Multimodal (Gemini)
 | Command | Example | Model |
 |---------|---------|-------|
-| `image_generate` | `image_generate "robot"` | Imagen 4 |
-| `image_analyze` | `image_analyze "describe"` | Gemini |
-| `video_generate` | `video_generate "sunset"` | Veo 3.1 |
-| `video_analyze` | `video_analyze "summarize"` | Gemini |
-| `images_to_video` | `>=> images_to_video` | ffmpeg |
-| `text_to_speech` | `>=> text_to_speech "en"` | Gemini TTS |
-| `translate` | `>=> translate "Japanese"` | Gemini |
+| `image_generate` | `(image_generate "robot")` | Imagen 4 |
+| `image_analyze` | `(image_analyze "describe")` | Gemini |
+| `video_generate` | `(video_generate "sunset")` | Veo 3.1 |
+| `video_analyze` | `(video_analyze "summarize")` | Gemini |
+| `images_to_video` | `images_to_video` | ffmpeg |
+| `text_to_speech` | `(text_to_speech "en")` | Gemini TTS |
+| `translate` | `(translate "Japanese")` | Gemini |
 
 ### Notifications
 | Command | Example | Service |
 |---------|---------|---------|
-| `email` | `>=> email "you@gmail.com"` | Gmail |
-| `notify` | `>=> notify "slack"` | Slack/Discord/Telegram |
-| `whatsapp` | `>=> whatsapp "+1234567890"` | Twilio |
+| `email` | `(email "you@gmail.com")` | Gmail |
+| `notify` | `(notify "slack")` | Slack/Discord/Telegram |
+| `whatsapp` | `(whatsapp "+1234567890")` | Twilio |
 
 ### Control Flow
 | Command | Example | Description |
 |---------|---------|-------------|
-| `( <*> )` | `( a <*> b <*> c )` | Run branches concurrently |
-| `if` | `if "rain > 50"` | Conditional execution |
-| `foreach` | `>=> foreach "line"` | Iterate over items |
-| `match` | `>=> match` | Pattern-match on piped input |
-| `fmap` / `pfmap` | `>=> fmap "cmd"` | Map a command over items (parallel variant: `pfmap`) |
+| `par` | `(par a b c)` | Run branches concurrently |
+| `when` | `(when "rain > 50")` | Conditional execution (resolves to the `if` builtin) |
+| `foreach` | `(foreach "line")` | Iterate over items |
+| `match` | `match` | Pattern-match on piped input |
+| `fmap` / `pfmap` | `(fmap "cmd")` | Map a command over items (parallel variant: `pfmap`) |
 
 ### MCP (Model Context Protocol)
 | Command | Example | Description |
 |---------|---------|-------------|
-| `mcp_connect` | `mcp_connect "name" "cmd"` | Connect to an MCP server |
-| `mcp` | `mcp "server:tool" "args"` | Call an MCP tool |
+| `mcp_connect` | `(mcp_connect "name" "cmd")` | Connect to an MCP server |
+| `mcp` | `(mcp "server:tool" "args")` | Call an MCP tool |
 | `mcp_list` | `mcp_list` | List connected servers and tools |
-| `mcp_search` | `mcp_search "query"` | Search the MCP registry |
-| `mcp_agent` | `>=> mcp_agent "task"` | AI-driven MCP tool selection |
+| `mcp_search` | `(mcp_search "query")` | Search the MCP registry |
+| `mcp_agent` | `(mcp_agent "task")` | AI-driven MCP tool selection |
 
 ### Knowledge & Retrieval
 | Command | Example | Description |
 |---------|---------|-------------|
 | `rag_connect` / `rag_index` / `rag_query` | `rag_query "question"` | Postgres + LLM RAG pipeline |
 | `kg_extract` / `kg_query` / `kg_cypher` | `kg_query "question"` | Knowledge graph + GraphRAG |
-| `perplexity` | `perplexity "query"` | Perplexity-backed search (`_pro`, `_recent`, `_domain` variants) |
+| `perplexity` | `(perplexity "query")` | Perplexity-backed search (`_pro`, `_recent`, `_domain` variants) |
 
 ### AI Backends & Tooling
 | Command | Example | Description |
 |---------|---------|-------------|
-| `claude` | `>=> claude "prompt"` | Claude (Anthropic) completion |
-| `ollama` | `>=> ollama "prompt"` | Local Ollama model |
-| `agent` | `>=> agent "task"` | Natural-language → DSL agent |
-| `codereview` | `>=> codereview` | Multi-model code-review debate |
+| `claude` | `(claude "prompt")` | Claude (Anthropic) completion |
+| `ollama` | `(ollama "prompt")` | Local Ollama model |
+| `agent` | `(agent "task")` | Natural-language → DSL agent |
+| `codereview` | `codereview` | Multi-model code-review debate |
 | `hf_*` | `hf_generate "prompt"` | Hugging Face inference (generate, classify, NER, QA, embeddings, image, speech, ...) |
 
 ### Infrastructure
 | Command | Example | Description |
 |---------|---------|-------------|
-| `exec` | `>=> exec "go build"` | Run a shell command in a pipeline |
+| `exec` | `(exec "go build")` | Run a shell command in a pipeline |
 | `ssl_check` / `ping` / `dns_lookup` / `http_check` / `whois` | `ssl_check "example.com"` | Network diagnostics (pure Go) |
-| `deploy` / `schedule` / `undeploy` | `>=> deploy` | Cloud Run job deploy + Cloud Scheduler |
-| `pdf_fields` / `pdf_fill` | `>=> pdf_fill "form.pdf"` | AI-powered PDF form filling |
-| `github_pages_html` | `>=> github_pages_html "Title"` | Deploy HTML to GitHub Pages |
+| `deploy` / `schedule` / `undeploy` | `deploy` | Cloud Run job deploy + Cloud Scheduler |
+| `pdf_fields` / `pdf_fill` | `(pdf_fill "form.pdf")` | AI-powered PDF form filling |
+| `github_pages_html` | `(github_pages_html "Title")` | Deploy HTML to GitHub Pages |
 
 ## Example Pipelines
 
 ### Daily Job Hunt
 ```
-( job_search "golang contract" "remote"
-  <*> job_search "go microservices" "remote"
-)
->=> merge
->=> ask "deduplicate, format as table, sort by rate"
->=> email "you@gmail.com"
+(pipe
+  (par
+    (job_search "golang contract" "remote")
+    (job_search "go microservices" "remote"))
+  merge
+  (ask "deduplicate, format as table, sort by rate")
+  (email "you@gmail.com"))
 ```
 
 ### Stock Alert
 ```
-stock "NVDA" >=> if "change > 5" >=> notify "slack"
+(pipe (stock "NVDA") (when "change > 5") (notify "slack"))
 ```
 
 ### Tech Digest
 ```
-( rss "hn"
-  <*> rss "lobsters"
-  <*> reddit "r/golang" "top"
-  <*> news_headlines "technology"
-)
->=> merge >=> summarize >=> email "you@gmail.com"
+(pipe
+  (par
+    (rss "hn")
+    (rss "lobsters")
+    (reddit "r/golang" "top")
+    (news_headlines "technology"))
+  merge
+  summarize
+  (email "you@gmail.com"))
 ```
 
 ### Multimodal Pipeline
 ```
-search "butterflies migration"
->=> summarize
->=> text_to_speech "en"
->=> image_generate "monarch butterflies migrating"
->=> images_to_video
->=> youtube_upload "Butterfly Migration"
+(pipe
+  (search "butterflies migration")
+  summarize
+  (text_to_speech "en")
+  (image_generate "monarch butterflies migrating")
+  images_to_video
+  (youtube_upload "Butterfly Migration"))
 ```
 
 ### Nested Fan-out
 ```
-( ( search "React pros cons" >=> analyze
-    <*> search "Vue pros cons" >=> analyze
-    <*> search "Angular pros cons" >=> analyze
-  ) >=> merge >=> ask "summarize frontend frameworks"
-  <*> ( search "Node.js backend" >=> analyze
-        <*> search "Go backend" >=> analyze
-      ) >=> merge >=> ask "summarize backend options"
-)
->=> merge
->=> ask "full-stack recommendation"
->=> save "recommendation.md"
+(pipe
+  (par
+    (pipe
+      (par
+        (pipe (search "React pros cons") analyze)
+        (pipe (search "Vue pros cons") analyze)
+        (pipe (search "Angular pros cons") analyze))
+      merge
+      (ask "summarize frontend frameworks"))
+    (pipe
+      (par
+        (pipe (search "Node.js backend") analyze)
+        (pipe (search "Go backend") analyze))
+      merge
+      (ask "summarize backend options")))
+  merge
+  (ask "full-stack recommendation")
+  (save "recommendation.md"))
 ```
 
 ### Natural Language Mode
@@ -254,7 +280,7 @@ Natural Language ─── Gemini/Claude translates ──→ AgentScript DSL
                                                 Runtime executor
                                                 ┌─────┴─────┐
                                            Sequential    Fan-out
-                                             (>=>)        (<*>)
+                                            (pipe)        (par)
                                                 │            │
                                           Plugin registry  goroutines
                                                 │
@@ -281,19 +307,15 @@ in-process runtime continues to serve as the fast "memory" backend.
 ```
 agentscript/
 ├── cmd/
-│   ├── agentscript/       # CLI entry point (-e, -f, -i, -n modes)
-│   └── geminilive/        # Gemini live audio demo
+│   └── agentscript/       # CLI entry point (-e, file, stdin, --dry-run)
 ├── internal/agentscript/  # Runtime, grammar, registry, translator
-│   ├── grammar.go         # Morpheus DSL grammar (>=>, <*>, parentheses)
+│   ├── grammar.go         # interpreter Program/Statement/Command types
 │   ├── runtime.go         # Command execution engine
 │   ├── registry.go        # Plugin registration
-│   ├── translator.go      # Natural language → DSL
-│   └── script/            # DSL → Sibyl translator (Parse, Resolve, ...)
 ├── pkg/                   # Shared clients + plugin interface
 │   ├── plugin/            # The plugin.Plugin contract
 │   ├── claude/            # Claude API client
 │   ├── gemini/            # Gemini API client
-│   ├── geminilive/        # Gemini live client
 │   ├── google/            # Google Workspace helpers
 │   └── openai/            # OpenAI API client
 ├── plugins/               # One directory per integration
@@ -341,7 +363,7 @@ export TWILIO_WHATSAPP_FROM="whatsapp:+14155238886"
 
 ```bash
 # Expression mode
-./agentscript -e 'search "topic" >=> summarize'
+./agentscript -e '(pipe (search "topic") summarize)'
 
 # File mode
 ./agentscript -f examples/daily-briefing.as
@@ -376,7 +398,6 @@ CI (GitHub Actions) runs `go mod tidy`, `go vet -structtag=false`, `gofmt`,
 ## Built With
 
 - [Go 1.23](https://golang.org/) — Runtime engine
-- [Participle v2](https://github.com/alecthomas/participle) — Parser generator
 - [Gemini API](https://ai.google.dev/) — Text, Imagen 4, Veo 3.1, TTS
 - [Claude API](https://www.anthropic.com/) — Completions, code review, agents
 - [Model Context Protocol](https://modelcontextprotocol.io/) — Tool servers

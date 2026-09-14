@@ -1,129 +1,47 @@
+// Package agentscript — grammar.go holds the in-process interpreter's
+// program representation.
+//
+// It used to also hold a participle parser for the operator dialect
+// (`search "x" >=> summarize`). That dialect is gone: s-expressions are
+// the only surface syntax, and the single front end lives in pkg/script.
+// Source text now reaches this interpreter one way only:
+//
+//	Source >>> script.Parse >>> script.Resolve >>> scriptmem.RunMemory
+//
+// scriptmem builds these types directly from the resolved AST, so they
+// stay. The struct tags went with the parser — they described participle
+// productions and mean nothing now.
 package agentscript
 
-import (
-	"os"
-	"strings"
-
-	"github.com/alecthomas/participle/v2"
-	"github.com/alecthomas/participle/v2/lexer"
-)
-
-// Program represents a complete AgentScript program
+// Program represents a complete AgentScript program.
 type Program struct {
-	Statements []*Statement `@@*`
+	Statements []*Statement
 }
 
-// Statement can be a command or a fan-out group ( a <*> b <*> c )
+// Statement is a command or a fan-out group, optionally piping its
+// output into a following statement.
 type Statement struct {
-	Parallel *Parallel  `( "(" @@ ")" |`
-	Command  *Command   `  @@ )`
-	Pipe     *Statement `( ">=>" @@ )?`
+	Parallel *Parallel
+	Command  *Command
+	Pipe     *Statement
 }
 
-// Parallel represents a fan-out group: ( branch <*> branch <*> ... )
-// Uses the Morpheus fan-out operator <*> to separate concurrent branches.
-// Branches accumulates all arms into the slice used by runtime.executeParallel.
+// Parallel is a fan-out group: branches that run concurrently on the
+// same input. Branches is consumed by runtime.executeParallel.
 type Parallel struct {
-	Branches []*Statement `@@ ( "<*>" @@ )*`
+	Branches []*Statement
 }
 
-// Command represents a single command with up to 3 string arguments
+// Command is a single verb invocation with up to four string arguments.
+//
+// The verb was formerly constrained by a parser alternation listing every
+// name. Validation now happens in script.Resolve against the registry,
+// which is the single source of truth for the vocabulary, so Action is a
+// plain string here.
 type Command struct {
-	Action string `@(
-		"search" | "summarize" | "save" | "read" | "stdin" | "ask" |
-		"analyze" | "list" | "merge" | "email" | "calendar" | "meet" |
-		"drive_save" | "doc_create" | "sheet_append" | "sheet_create" |
-		"task" | "contact_find" | "youtube_search" | "youtube_upload" |
-		"youtube_shorts" | "image_generate" | "image_analyze" |
-		"video_analyze" | "video_generate" | "images_to_video" |
-		"text_to_speech" | "audio_video_merge" | "image_audio_merge" |
-		"maps_trip" | "form_create" | "form_responses" | "translate" |
-		"places_search" | "mcp_connect" | "mcp_list" | "mcp" |
-		"video_script" | "confirm" | "github_pages_html" |
-		"job_search" | "weather" | "news_headlines" | "news" | "stock" |
-		"crypto" | "reddit" | "rss" | "notify" | "whatsapp" | "twitter" |
-		"foreach" | "if" | "match" | "hf_generate" | "hf_summarize" | "hf_classify" |
-		"hf_ner" | "hf_translate" | "hf_embeddings" | "hf_qa" |
-		"hf_fill_mask" | "hf_zero_shot" | "hf_image_generate" |
-		"hf_image_classify" | "hf_speech_to_text" | "hf_similarity" |
-		"emoji_style" | "perplexity" | "perplexity_pro" | "perplexity_recent" | "perplexity_domain" | "agent" | "codereview" | "codereview_focus" | "mcp_agent" | "plug_agent" | "mcp_search" | "mcp_search_install" |
-		"ssl_check" | "ping" | "dns_lookup" | "port_check" | "http_check" | "whois" |
-		"fmap" | "pfmap" |
-		"<>" |
-		"gcp_check" | "deploy" | "schedule" | "undeploy" | "claude" | "render" |
-		"pdf_fields" | "pdf_fill" |
-		"table_render" |
-		"ollama" |
-		"rag_connect" | "rag_index" | "rag_query" | "rag_schema" | "rag_status" |
-		"kg_connect" | "kg_extract" | "kg_query" | "kg_hybrid" | "kg_path" | "kg_cypher" | "kg_ingest" | "kg_status" |
-		"exec"
-	)`
-	Arg  string `(@String | @TripleString)?`
-	Arg2 string `(@String | @TripleString)?`
-	Arg3 string `(@String | @TripleString)?`
-	Arg4 string `(@String | @TripleString)?`
-}
-
-// Lexer definition — Morpheus operators replace the old -> and parallel{} syntax
-var scriptLexer = lexer.MustSimple([]lexer.SimpleRule{
-	{Name: "Comment", Pattern: `//[^\n]*\n?`},
-	{Name: "Keyword", Pattern: `(search|summarize|save|read|stdin|ask|analyze|list|merge|email|calendar|meet|drive_save|doc_create|sheet_append|sheet_create|task|contact_find|youtube_search|youtube_upload|youtube_shorts|image_generate|image_analyze|video_analyze|video_generate|images_to_video|text_to_speech|audio_video_merge|image_audio_merge|maps_trip|form_create|form_responses|translate|places_search|mcp_connect|mcp_list|mcp_search_install|mcp_search|mcp_agent|mcp|video_script|confirm|github_pages_html|job_search|weather|news_headlines|news|stock|crypto|reddit|rss|notify|whatsapp|twitter|foreach|if|match|hf_generate|hf_summarize|hf_classify|hf_ner|hf_translate|hf_embeddings|hf_qa|hf_fill_mask|hf_zero_shot|hf_image_generate|hf_image_classify|hf_speech_to_text|hf_similarity|emoji_style|perplexity_domain|perplexity_recent|perplexity_pro|perplexity|plug_agent|codereview_focus|codereview|agent|ssl_check|ping|dns_lookup|port_check|http_check|whois|fmap|pfmap|gcp_check|deploy|schedule|undeploy|claude|render|pdf_fields|pdf_fill|table_render|ollama|rag_connect|rag_index|rag_query|rag_schema|rag_status|kg_connect|kg_extract|kg_query|kg_hybrid|kg_path|kg_cypher|kg_ingest|kg_status|exec)`},
-	// TripleString must come BEFORE String so """ wins precedence over "".
-	// Inside triple quotes: everything literal — no escape processing,
-	// newlines preserved, nested quotes and backticks pass through.
-	// Used by block-body preprocessors to avoid escape-hell.
-	{Name: "TripleString", Pattern: `"""(?:[^"]|"[^"]|""[^"])*"""`},
-	{Name: "String", Pattern: "`[^`]*`" + `|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`},
-	{Name: "Kleisli", Pattern: `>=>`},
-	{Name: "FanOut", Pattern: `<\*>`},
-	{Name: "Semigroup", Pattern: `<>`},
-	{Name: "LParen", Pattern: `\(`},
-	{Name: "RParen", Pattern: `\)`},
-	{Name: "Whitespace", Pattern: `[ \t\n\r]+`},
-})
-
-// Parser instance
-var Parser = participle.MustBuild[Program](
-	participle.Lexer(scriptLexer),
-	participle.Elide("Whitespace", "Comment"),
-	participle.Map(unquoteString, "String"),
-	participle.Map(unquoteTripleString, "TripleString"),
-)
-
-// unquoteString strips surrounding quotes from string tokens, supporting ", ', and `
-func unquoteString(token lexer.Token) (lexer.Token, error) {
-	s := token.Value
-	if len(s) >= 2 {
-		first := s[0]
-		last := s[len(s)-1]
-		if (first == '"' && last == '"') || (first == '\'' && last == '\'') || (first == '`' && last == '`') {
-			token.Value = s[1 : len(s)-1]
-		}
-	}
-	return token, nil
-}
-
-// unquoteTripleString strips the surrounding """ from a triple-quoted string.
-// Body content passes through literally — no escape processing.
-func unquoteTripleString(token lexer.Token) (lexer.Token, error) {
-	s := token.Value
-	if len(s) >= 6 && strings.HasPrefix(s, `"""`) && strings.HasSuffix(s, `"""`) {
-		token.Value = s[3 : len(s)-3]
-	}
-	return token, nil
-}
-
-// Parse parses a Morpheus AgentScript program from a string.
-// Always preprocesses to handle multiline match blocks.
-func Parse(input string) (*Program, error) {
-	return Parser.ParseString("", input)
-}
-
-// ParseFile parses DSL from a file path with preprocessing applied.
-func ParseFile(path string) (*Program, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return Parser.ParseString("", string(data))
+	Action string
+	Arg    string
+	Arg2   string
+	Arg3   string
+	Arg4   string
 }

@@ -43,7 +43,8 @@ func resolveSrc(t *testing.T, reg *registry.Registry, src string) (resolved.AST,
 
 func TestResolve_SingleCall(t *testing.T) {
 	reg := echoReg(t)
-	got, err := resolveSrc(t, reg, `temporal static ( echo "hello" )`)
+	got, err := resolveSrc(t, reg, `(block :backend temporal :mode static
+	  (echo "hello"))`)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -74,7 +75,11 @@ func TestResolve_SingleCall(t *testing.T) {
 
 func TestResolve_Pipeline(t *testing.T) {
 	reg := echoReg(t)
-	got, err := resolveSrc(t, reg, `temporal static ( echo "a" >=> echo "b" >=> echo "c" )`)
+	got, err := resolveSrc(t, reg, `(block :backend temporal :mode static
+	  (pipe
+	    (echo "a")
+	    (echo "b")
+	    (echo "c")))`)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -95,7 +100,8 @@ func TestResolve_Pipeline(t *testing.T) {
 
 func TestResolve_PreservesBackendMode(t *testing.T) {
 	reg := echoReg(t)
-	got, err := resolveSrc(t, reg, `memory dynamic ( echo "x" )`)
+	got, err := resolveSrc(t, reg, `(block :backend memory :mode dynamic
+	  (echo "x"))`)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -110,7 +116,8 @@ func TestResolve_PreservesBackendMode(t *testing.T) {
 
 func TestResolve_DoesNotMutateInput(t *testing.T) {
 	reg := echoReg(t)
-	a, err := script.Parse(context.Background(), script.Source(`temporal static ( echo "x" )`))
+	a, err := script.Parse(context.Background(), script.Source(`(block :backend temporal :mode static
+	  (echo "x"))`))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -137,7 +144,8 @@ func TestResolve_DoesNotMutateInput(t *testing.T) {
 func TestResolveWith_Arrow(t *testing.T) {
 	reg := echoReg(t)
 	arrow := script.ResolveWith(reg)
-	a, _ := script.Parse(context.Background(), script.Source(`temporal static ( echo "hi" )`))
+	a, _ := script.Parse(context.Background(), script.Source(`(block :backend temporal :mode static
+	  (echo "hi"))`))
 	got, err := arrow(context.Background(), a)
 	if err != nil {
 		t.Fatalf("arrow: %v", err)
@@ -151,7 +159,8 @@ func TestResolveWith_Arrow(t *testing.T) {
 
 func TestResolve_UnknownBuiltin(t *testing.T) {
 	reg := echoReg(t)
-	_, err := resolveSrc(t, reg, `temporal static ( nonexistent "x" )`)
+	_, err := resolveSrc(t, reg, `(block :backend temporal :mode static
+	  (nonexistent "x"))`)
 	if err == nil {
 		t.Fatal("expected error for unknown builtin")
 	}
@@ -175,7 +184,8 @@ func TestResolve_UnknownBuiltin(t *testing.T) {
 }
 
 func TestResolve_NilRegistry(t *testing.T) {
-	a, _ := script.Parse(context.Background(), script.Source(`temporal static ( echo "x" )`))
+	a, _ := script.Parse(context.Background(), script.Source(`(block :backend temporal :mode static
+	  (echo "x"))`))
 	_, err := script.Resolve(context.Background(), nil, a)
 	if err == nil {
 		t.Fatal("expected error for nil registry")
@@ -186,7 +196,8 @@ func TestResolve_NilRegistry(t *testing.T) {
 
 func TestResolve_TooFewArgs(t *testing.T) {
 	reg := echoReg(t) // echo requires 1 arg
-	_, err := resolveSrc(t, reg, `temporal static ( echo )`)
+	_, err := resolveSrc(t, reg, `(block :backend temporal :mode static
+	  echo)`)
 	if err == nil {
 		t.Fatal("expected arity error for echo with 0 args")
 	}
@@ -201,7 +212,8 @@ func TestResolve_TooFewArgs(t *testing.T) {
 
 func TestResolve_TooManyArgs(t *testing.T) {
 	reg := echoReg(t) // echo takes exactly 1 arg, not variadic
-	_, err := resolveSrc(t, reg, `temporal static ( echo "a" "b" "c" )`)
+	_, err := resolveSrc(t, reg, `(block :backend temporal :mode static
+	  (echo "a" "b" "c"))`)
 	if err == nil {
 		t.Fatal("expected arity error for echo with 3 args")
 	}
@@ -225,19 +237,23 @@ func TestResolve_OptionalArg(t *testing.T) {
 		},
 	})
 	// 1 arg (omitting the optional) should resolve.
-	if _, err := resolveSrc(t, r, `temporal static ( greet "alice" )`); err != nil {
+	if _, err := resolveSrc(t, r, `(block :backend temporal :mode static
+	  (greet "alice"))`); err != nil {
 		t.Errorf("1 arg should resolve (optional omitted): %v", err)
 	}
 	// 2 args should resolve.
-	if _, err := resolveSrc(t, r, `temporal static ( greet "alice" "hi" )`); err != nil {
+	if _, err := resolveSrc(t, r, `(block :backend temporal :mode static
+	  (greet "alice" "hi"))`); err != nil {
 		t.Errorf("2 args should resolve: %v", err)
 	}
 	// 0 args should fail (name is required).
-	if _, err := resolveSrc(t, r, `temporal static ( greet )`); err == nil {
+	if _, err := resolveSrc(t, r, `(block :backend temporal :mode static
+	  greet)`); err == nil {
 		t.Error("0 args should fail (name required)")
 	}
 	// 3 args should fail (only 2 declared, not variadic).
-	if _, err := resolveSrc(t, r, `temporal static ( greet "a" "b" "c" )`); err == nil {
+	if _, err := resolveSrc(t, r, `(block :backend temporal :mode static
+	  (greet "a" "b" "c"))`); err == nil {
 		t.Error("3 args should fail (max 2)")
 	}
 }
@@ -255,15 +271,18 @@ func TestResolve_Variadic(t *testing.T) {
 		},
 	})
 	// 1 arg (just the required leading one).
-	if _, err := resolveSrc(t, r, `temporal static ( concat "a" )`); err != nil {
+	if _, err := resolveSrc(t, r, `(block :backend temporal :mode static
+	  (concat "a"))`); err != nil {
 		t.Errorf("1 arg should resolve: %v", err)
 	}
 	// many args.
-	if _, err := resolveSrc(t, r, `temporal static ( concat "a" "b" "c" "d" )`); err != nil {
+	if _, err := resolveSrc(t, r, `(block :backend temporal :mode static
+	  (concat "a" "b" "c" "d"))`); err != nil {
 		t.Errorf("many args should resolve for variadic: %v", err)
 	}
 	// 0 args should fail (first is required).
-	if _, err := resolveSrc(t, r, `temporal static ( concat )`); err == nil {
+	if _, err := resolveSrc(t, r, `(block :backend temporal :mode static
+	  concat)`); err == nil {
 		t.Error("0 args should fail (first required)")
 	}
 }
@@ -278,10 +297,12 @@ func TestResolve_NoArgBuiltin(t *testing.T) {
 		AgentID:   "agentscript/now",
 		ArgSchema: registry.ArgSchema{}, // no params
 	})
-	if _, err := resolveSrc(t, r, `temporal static ( now )`); err != nil {
+	if _, err := resolveSrc(t, r, `(block :backend temporal :mode static
+	  now)`); err != nil {
 		t.Errorf("no-arg builtin should resolve with 0 args: %v", err)
 	}
-	if _, err := resolveSrc(t, r, `temporal static ( now "extra" )`); err == nil {
+	if _, err := resolveSrc(t, r, `(block :backend temporal :mode static
+	  (now "extra"))`); err == nil {
 		t.Error("no-arg builtin should reject an arg")
 	}
 }

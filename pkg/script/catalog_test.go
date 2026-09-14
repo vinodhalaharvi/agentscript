@@ -41,7 +41,8 @@ func TestCompleteRegistry_MemoryVerbResolvesOnMemory(t *testing.T) {
 	// later step — here we assert resolution succeeds, which is this PR's
 	// contract. Compile would invoke the temporal-only Finalize, so we
 	// stop at Resolve.
-	a, err := script.Parse(context.Background(), script.Source(`memory static ( hf_summarize "x" )`))
+	a, err := script.Parse(context.Background(), script.Source(`(block :backend memory :mode static
+	  (hf_summarize "x"))`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -54,7 +55,8 @@ func TestCompleteRegistry_MemoryVerbUnderTemporal_NotImplemented(t *testing.T) {
 	r := script.CompleteRegistry()
 	// hf_summarize under temporal: KNOWN verb, not available on temporal.
 	// This is caught at RESOLVE (availability check), before Finalize.
-	a, err := script.Parse(context.Background(), script.Source(`temporal static ( hf_summarize "x" )`))
+	a, err := script.Parse(context.Background(), script.Source(`(block :backend temporal :mode static
+	  (hf_summarize "x"))`))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -79,11 +81,13 @@ func TestCompleteRegistry_EchoRunsOnTemporal(t *testing.T) {
 	r := script.CompleteRegistry()
 	// echo is the one verb on BOTH backends. It compiles end-to-end on
 	// temporal (Finalize produces a Plan)...
-	if _, err := script.Compile(context.Background(), r, script.Source(`temporal static ( echo "hi" )`)); err != nil {
+	if _, err := script.Compile(context.Background(), r, script.Source(`(block :backend temporal :mode static
+	  (echo "hi"))`)); err != nil {
 		t.Errorf("echo should compile on temporal: %v", err)
 	}
 	// ...and resolves on memory (memory execution is a later step).
-	a, _ := script.Parse(context.Background(), script.Source(`memory static ( echo "hi" )`))
+	a, _ := script.Parse(context.Background(), script.Source(`(block :backend memory :mode static
+	  (echo "hi"))`))
 	if _, err := script.Resolve(context.Background(), r, a); err != nil {
 		t.Errorf("echo should resolve on memory: %v", err)
 	}
@@ -94,8 +98,10 @@ func TestCompleteRegistry_SafetyNetUnknownStillUnknown(t *testing.T) {
 	// A genuinely unknown name (hallucination) must STILL be unknown,
 	// on either backend — the safety net is preserved.
 	for _, src := range []string{
-		`temporal static ( teleport "mars" )`,
-		`memory static ( teleport "mars" )`,
+		`(block :backend temporal :mode static
+		  (teleport "mars"))`,
+		`(block :backend memory :mode static
+		  (teleport "mars"))`,
 	} {
 		_, err := script.Compile(context.Background(), r, script.Source(src))
 		if err == nil {

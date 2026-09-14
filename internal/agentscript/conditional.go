@@ -254,22 +254,24 @@ func EvaluateConditionString(condStr string, input string, vars map[string]strin
 //
 // Syntax:
 //   match
-//     | contains "rain"   >=> notify "slack"
-//     | temp > 90         >=> email "alert@company.com"
-//     | _                 >=> save "normal.md"
+//     | contains "rain"   >=> (notify "slack")
+//     | temp > 90         >=> (email "alert@company.com")
+//     | _                 >=> (pipe (save "normal.md") (notify "slack"))
 //
 // Rules:
 //   - Each arm starts with |
 //   - Condition uses the same syntax as if (contains, >, <, ==, etc.)
 //   - _ is the wildcard/default arm — always matches
 //   - First matching arm wins — rest are skipped
-//   - The pipeline after >=> is the action for that arm
+//   - The s-expression after >=> is the action for that arm
 //   - The piped input is passed through to the matching arm's action
 //
 // This is essentially a switch/case over the pipeline value using
 // the same Condition evaluator as `if`.
 
-// MatchArm is one | pattern >=> action branch.
+// MatchArm is one `| pattern >=> action` branch. The separator stays
+// >=> because it divides pattern from action; it is not composition.
+// The action itself is an s-expression parsed by Parse.
 type MatchArm struct {
 	Pattern  string // the condition string, or "_" for wildcard
 	Pipeline string // raw DSL to execute if pattern matches
@@ -278,9 +280,9 @@ type MatchArm struct {
 // ParseMatchBlock parses the body of a match statement.
 // Input looks like:
 //
-//	| contains "rain"   >=> notify "slack"
-//	| temp > 90         >=> email "alert@company.com"
-//	| _                 >=> save "normal.md"
+//	| contains "rain"   >=> (notify "slack")
+//	| temp > 90         >=> (email "alert@company.com")
+//	| _                 >=> (pipe (save "normal.md") (notify "slack"))
 func ParseMatchBlock(body string) ([]MatchArm, error) {
 	var arms []MatchArm
 	body = strings.ReplaceAll(body, "|||", "\n")

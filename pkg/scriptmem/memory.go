@@ -96,7 +96,7 @@ func toProgram(r resolved.AST) (*agentscript.Program, ast.Backend, error) {
 }
 
 // nodeToStatement converts a resolved.Node into the old *Statement tree.
-//   - Pipeline → a chain of Statements linked by .Pipe (a >=> b >=> c)
+//   - Pipeline → a chain of Statements linked by .Pipe ((pipe a b c))
 //   - Parallel → a Statement whose .Parallel holds the branches
 //   - Call     → a Statement whose .Command holds the verb + args
 func nodeToStatement(n resolved.Node) (*agentscript.Statement, error) {

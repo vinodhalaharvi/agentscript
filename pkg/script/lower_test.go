@@ -39,7 +39,8 @@ func TestDefaultRegistry_HasEcho(t *testing.T) {
 // === Lower / Finalize via Compile (happy paths) ============================
 
 func TestCompile_SingleEcho(t *testing.T) {
-	plan, err := compile(t, `temporal static ( echo "hello" )`)
+	plan, err := compile(t, `(block :backend temporal :mode static
+	  (echo "hello"))`)
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -59,7 +60,11 @@ func TestCompile_SingleEcho(t *testing.T) {
 }
 
 func TestCompile_Pipeline_ChainsDependencies(t *testing.T) {
-	plan, err := compile(t, `temporal static ( echo "a" >=> echo "b" >=> echo "c" )`)
+	plan, err := compile(t, `(block :backend temporal :mode static
+	  (pipe
+	    (echo "a")
+	    (echo "b")
+	    (echo "c")))`)
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -88,7 +93,8 @@ func TestCompile_Pipeline_ChainsDependencies(t *testing.T) {
 
 func TestCompile_NoArgEcho(t *testing.T) {
 	// echo's arg is optional, so a bare echo is valid.
-	plan, err := compile(t, `temporal static ( echo )`)
+	plan, err := compile(t, `(block :backend temporal :mode static
+	  echo)`)
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -100,7 +106,8 @@ func TestCompile_NoArgEcho(t *testing.T) {
 // === Failure paths surface at the right phase ==============================
 
 func TestCompile_UnknownBuiltin(t *testing.T) {
-	_, err := compile(t, `temporal static ( nope "x" )`)
+	_, err := compile(t, `(block :backend temporal :mode static
+	  (nope "x"))`)
 	if err == nil {
 		t.Fatal("expected error for unknown builtin")
 	}
@@ -110,7 +117,8 @@ func TestCompile_ParallelNotYetSupported(t *testing.T) {
 	// Even if the parser produced a Parallel, Lower must reject it
 	// clearly. (The current parser may not emit it, but the lowering
 	// guard must exist.)
-	_, err := compile(t, `temporal static ( echo "a" )`)
+	_, err := compile(t, `(block :backend temporal :mode static
+	  (echo "a"))`)
 	if err != nil {
 		t.Fatalf("control case should compile: %v", err)
 	}
@@ -118,14 +126,16 @@ func TestCompile_ParallelNotYetSupported(t *testing.T) {
 
 func TestFinalize_RejectsMemoryBackend(t *testing.T) {
 	// memory backend isn't supported by Finalize yet.
-	_, err := compile(t, `memory static ( echo "x" )`)
+	_, err := compile(t, `(block :backend memory :mode static
+	  (echo "x"))`)
 	if err == nil {
 		t.Fatal("expected error: memory backend not supported")
 	}
 }
 
 func TestFinalize_RejectsDynamicMode(t *testing.T) {
-	_, err := compile(t, `temporal dynamic ( echo "x" )`)
+	_, err := compile(t, `(block :backend temporal :mode dynamic
+	  (echo "x"))`)
 	if err == nil {
 		t.Fatal("expected error: dynamic mode not supported")
 	}
@@ -134,7 +144,10 @@ func TestFinalize_RejectsDynamicMode(t *testing.T) {
 // === Validate phase ========================================================
 
 func TestValidate_AcceptsCompiledPlan(t *testing.T) {
-	plan, err := compile(t, `temporal static ( echo "a" >=> echo )`)
+	plan, err := compile(t, `(block :backend temporal :mode static
+	  (pipe
+	    (echo "a")
+	    echo))`)
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
@@ -164,7 +177,8 @@ func TestCompile_CustomBuiltin(t *testing.T) {
 		// is registered).
 		Backends: []registry.Backend{registry.BackendTemporal},
 	})
-	plan, err := script.Compile(context.Background(), r, script.Source(`temporal static ( shout "hey" )`))
+	plan, err := script.Compile(context.Background(), r, script.Source(`(block :backend temporal :mode static
+	  (shout "hey"))`))
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}

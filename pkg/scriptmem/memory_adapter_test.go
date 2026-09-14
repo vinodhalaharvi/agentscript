@@ -31,7 +31,8 @@ func resolveMemory(t *testing.T, src string) (prog *agentscript.Program, backend
 }
 
 func TestAdapter_SingleCall(t *testing.T) {
-	prog, backend := resolveMemory(t, `memory static ( hf_summarize "the thread" )`)
+	prog, backend := resolveMemory(t, `(block :backend memory :mode static
+	  (hf_summarize "the thread"))`)
 	if backend != ast.BackendMemory {
 		t.Fatalf("backend = %v, want memory", backend)
 	}
@@ -51,7 +52,11 @@ func TestAdapter_SingleCall(t *testing.T) {
 }
 
 func TestAdapter_PipelineChains(t *testing.T) {
-	prog, _ := resolveMemory(t, `memory static ( search "x" >=> hf_summarize >=> echo )`)
+	prog, _ := resolveMemory(t, `(block :backend memory :mode static
+	  (pipe
+	    (search "x")
+	    hf_summarize
+	    echo))`)
 	s := prog.Statements[0]
 	names := []string{}
 	for s != nil {
@@ -66,7 +71,8 @@ func TestAdapter_PipelineChains(t *testing.T) {
 }
 
 func TestAdapter_RejectsTemporalBackend(t *testing.T) {
-	a, _ := script.Parse(context.Background(), script.Source(`temporal static ( echo "x" )`))
+	a, _ := script.Parse(context.Background(), script.Source(`(block :backend temporal :mode static
+	  (echo "x"))`))
 	r, _ := script.Resolve(context.Background(), script.CompleteRegistry(), a)
 	_, err := RunMemory(context.Background(), MemoryConfig{}, r)
 	if err == nil {

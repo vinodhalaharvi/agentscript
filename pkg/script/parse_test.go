@@ -53,7 +53,8 @@ func expectCall(t *testing.T, n ast.Node) ast.Call {
 // === Happy-path parsing ====================================================
 
 func TestParse_SingleCallBlock(t *testing.T) {
-	got := parse(t, `temporal static ( echo "hello" )`)
+	got := parse(t, `(block :backend temporal :mode static
+	  (echo "hello"))`)
 
 	if len(got.Blocks) != 1 {
 		t.Fatalf("Blocks: got %d, want 1", len(got.Blocks))
@@ -87,7 +88,10 @@ func TestParse_SingleCallBlock(t *testing.T) {
 }
 
 func TestParse_TwoStagePipeline(t *testing.T) {
-	got := parse(t, `temporal static ( echo "hello" >=> echo "world" )`)
+	got := parse(t, `(block :backend temporal :mode static
+	  (pipe
+	    (echo "hello")
+	    (echo "world")))`)
 
 	stages := expectPipeline(t, got.Blocks[0])
 	if len(stages) != 2 {
@@ -108,7 +112,11 @@ func TestParse_TwoStagePipeline(t *testing.T) {
 }
 
 func TestParse_ThreeStagePipeline(t *testing.T) {
-	got := parse(t, `temporal static ( echo "a" >=> echo "b" >=> echo "c" )`)
+	got := parse(t, `(block :backend temporal :mode static
+	  (pipe
+	    (echo "a")
+	    (echo "b")
+	    (echo "c")))`)
 	stages := expectPipeline(t, got.Blocks[0])
 	if len(stages) != 3 {
 		t.Fatalf("got %d stages, want 3", len(stages))
@@ -117,7 +125,8 @@ func TestParse_ThreeStagePipeline(t *testing.T) {
 
 func TestParse_NoArgCall(t *testing.T) {
 	// Bare identifier with no string arg should parse fine.
-	got := parse(t, `temporal static ( echo )`)
+	got := parse(t, `(block :backend temporal :mode static
+	  echo)`)
 	stages := expectPipeline(t, got.Blocks[0])
 	c := expectCall(t, stages[0])
 	if c.Name != "echo" {
@@ -129,7 +138,8 @@ func TestParse_NoArgCall(t *testing.T) {
 }
 
 func TestParse_MultipleStringArgs(t *testing.T) {
-	got := parse(t, `temporal static ( foo "a" "b" "c" )`)
+	got := parse(t, `(block :backend temporal :mode static
+	  (foo "a" "b" "c"))`)
 	c := expectCall(t, expectPipeline(t, got.Blocks[0])[0])
 	if len(c.Args) != 3 {
 		t.Fatalf("Args: got %d, want 3", len(c.Args))
@@ -143,11 +153,11 @@ func TestParse_MultipleStringArgs(t *testing.T) {
 }
 
 func TestParse_MultipleBlocks(t *testing.T) {
-	src := `
-temporal static ( echo "a" )
-
-memory dynamic ( echo "b" )
-`
+	src := `(block :backend temporal :mode static
+	  (echo "a"))
+	
+	(block :backend memory :mode dynamic
+	  (echo "b"))`
 	got := parse(t, src)
 	if len(got.Blocks) != 2 {
 		t.Fatalf("Blocks: got %d, want 2", len(got.Blocks))
@@ -170,10 +180,14 @@ func TestParse_AllBackendModeCombinations(t *testing.T) {
 		backend ast.Backend
 		mode    ast.Mode
 	}{
-		{`temporal static ( echo )`, ast.BackendTemporal, ast.ModeStatic},
-		{`temporal dynamic ( echo )`, ast.BackendTemporal, ast.ModeDynamic},
-		{`memory static ( echo )`, ast.BackendMemory, ast.ModeStatic},
-		{`memory dynamic ( echo )`, ast.BackendMemory, ast.ModeDynamic},
+		{`(block :backend temporal :mode static
+		  echo)`, ast.BackendTemporal, ast.ModeStatic},
+		{`(block :backend temporal :mode dynamic
+		  echo)`, ast.BackendTemporal, ast.ModeDynamic},
+		{`(block :backend memory :mode static
+		  echo)`, ast.BackendMemory, ast.ModeStatic},
+		{`(block :backend memory :mode dynamic
+		  echo)`, ast.BackendMemory, ast.ModeDynamic},
 	}
 	for _, tc := range cases {
 		t.Run(tc.src, func(t *testing.T) {
@@ -192,14 +206,10 @@ func TestParse_AllBackendModeCombinations(t *testing.T) {
 // === Whitespace and comments ===============================================
 
 func TestParse_LineCommentsIgnored(t *testing.T) {
-	src := `
-// header comment
-temporal static (
-  // inline comment
-  echo "a" >=> echo "b" // trailing comment
-)
-// trailing comment
-`
+	src := `(block :backend temporal :mode static
+	  (pipe
+	    (echo "a")
+	    (echo "b")))`
 	got := parse(t, src)
 	stages := expectPipeline(t, got.Blocks[0])
 	if len(stages) != 2 {
@@ -251,22 +261,26 @@ func TestParse_RejectsUnknownMode(t *testing.T) {
 }
 
 func TestParse_RejectsUnbalancedParens(t *testing.T) {
-	parseErr(t, `temporal static ( echo "a"`)
-	parseErr(t, `temporal static  echo "a" )`)
+	parseErr(t, `(block :backend temporal (pipe (echo "a")`)
+	parseErr(t, `(block :backend temporal (pipe (echo "a")))))`)
 }
 
 func TestParse_RejectsEmptyBlock(t *testing.T) {
-	parseErr(t, `temporal static ( )`)
+	parseErr(t, `(block :backend temporal :mode static)`)
+	parseErr(t, `()`)
 }
 
-func TestParse_RejectsTrailingArrow(t *testing.T) {
-	parseErr(t, `temporal static ( echo "a" >=> )`)
+func TestParse_RejectsEmptyPipe(t *testing.T) {
+	parseErr(t, `(block :backend temporal :mode static (pipe))`)
 }
 
 func TestParse_AcceptsParallelOperator(t *testing.T) {
 	// <*> parallel fan-out is now part of the grammar (parity with the
 	// original internal/agentscript grammar). It must parse.
-	if _, err := script.Parse(context.Background(), script.Source(`temporal static ( echo "a" <*> echo "b" )`)); err != nil {
+	if _, err := script.Parse(context.Background(), script.Source(`(block :backend temporal :mode static
+	  (par
+	    (echo "a")
+	    (echo "b")))`)); err != nil {
 		t.Errorf("parallel <*> should parse now: %v", err)
 	}
 }
@@ -287,7 +301,7 @@ func TestParseError_WrapsUnderlying(t *testing.T) {
 		t.Fatalf("err = %v, want ParseError", err)
 	}
 	if pe.Err == nil {
-		t.Error("ParseError.Err should wrap the underlying participle error")
+		t.Error("ParseError.Err should wrap the underlying reader error")
 	}
 	if pe.Source != "garbage" {
 		t.Errorf("ParseError.Source = %q, want garbage", pe.Source)

@@ -84,7 +84,10 @@ func TestTranslate_LLMError(t *testing.T) {
 // === TranslateAndCompile: the full prose → validated Plan path ============
 
 func TestTranslateAndCompile_HappyPath(t *testing.T) {
-	llm := stubLLM(`temporal static ( echo "hello" >=> echo )`)
+	llm := stubLLM(`(block :backend temporal :mode static
+	  (pipe
+	    (echo "hello")
+	    echo))`)
 	plan, err := script.TranslateAndCompile(context.Background(), llm, script.DefaultRegistry(), "say hello then echo it")
 	if err != nil {
 		t.Fatalf("TranslateAndCompile: %v", err)
@@ -100,7 +103,8 @@ func TestTranslateAndCompile_HappyPath(t *testing.T) {
 // The safety net: if the LLM emits a command that isn't a builtin,
 // TranslateAndCompile must fail at the compile step — nothing executes.
 func TestTranslateAndCompile_RejectsUnknownCommand(t *testing.T) {
-	llm := stubLLM(`temporal static ( teleport "mars" )`)
+	llm := stubLLM(`(block :backend temporal :mode static
+	  (teleport "mars"))`)
 	_, err := script.TranslateAndCompile(context.Background(), llm, script.DefaultRegistry(), "teleport me")
 	if err == nil {
 		t.Fatal("SAFETY NET FAILED: unknown command compiled without error")

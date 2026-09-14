@@ -1,278 +1,216 @@
+// Command agentscript compiles and runs an AgentScript program.
+//
+// There is one binary and one surface syntax. Which backend a program
+// runs on is a property of the source, not a flag:
+//
+//	(block :backend memory :mode static BODY)     runs in-process, now
+//	(block :backend temporal :mode static BODY)   runs as a durable workflow
+//
+// A program with no explicit (block ...) wrapper defaults to memory, so
+// the common case needs no ceremony:
+//
+//	agentscript -e '(pipe (search "go releases") summarize)'
+//
+// Both paths share the whole front end and diverge only at the end:
+//
+//	Source >>> Parse >>> Resolve >>> RunMemory                      (memory)
+//	Source >>> Parse >>> Resolve >>> Lower >>> Finalize >>> Validate >>> Submit
+//
+// Submitting a temporal program needs a Temporal cluster and a Sibyl
+// worker; --dry-run compiles and prints the Plan without either.
 package main
 
 import (
-	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/vinodhalaharvi/agentscript/internal/agentscript"
+	"go.temporal.io/sdk/client"
+
+	sibyl "github.com/vinodhalaharvi/sibyl/agent"
+
+	"github.com/vinodhalaharvi/agentscript/pkg/script"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/ast"
+	"github.com/vinodhalaharvi/agentscript/pkg/scriptmem"
 )
 
 func main() {
-	// Flags
-	verbose := flag.Bool("v", false, "Verbose output")
-	interactive := flag.Bool("i", false, "Interactive REPL mode")
-	natural := flag.Bool("n", false, "Natural language mode (translates input to DSL)")
-	script := flag.String("e", "", "Execute DSL script directly")
-	file := flag.String("f", "", "Execute DSL script from file")
-	llmBackend := flag.String("llm", "claude-code", "default LLM backend: claude-code | gemini | claude")
+	expr := flag.String("e", "", "execute the given program text")
+	dryRun := flag.Bool("dry-run", false, "compile and print the Plan as JSON; do not run or submit")
+	hostPort := flag.String("temporal", "", "Temporal host:port (default: SDK default 127.0.0.1:7233)")
+	taskQueue := flag.String("queue", "", "Sibyl task queue (default: sibyl-agents)")
+	verbose := flag.Bool("v", false, "verbose output")
+	flag.Usage = usage
 	flag.Parse()
 
+	src, err := readSource(*expr, flag.Args())
+	if err != nil {
+		fatal("%v", err)
+	}
+
 	ctx := context.Background()
+	grammar := script.Grammar()
 
-	// Get API keys and credentials from environment
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-	googleCreds := os.Getenv("GOOGLE_CREDENTIALS_FILE")
-	if googleCreds == "" {
-		// Check default location
-		if _, err := os.Stat("credentials.json"); err == nil {
-			googleCreds = "credentials.json"
+	// One front end, whatever the backend.
+	parsed, err := script.Parse(ctx, src)
+	if err != nil {
+		fatal("%v", err)
+	}
+	resolvedAST, err := script.Resolve(ctx, grammar.Registry, parsed)
+	if err != nil {
+		fatal("resolve: %v", err)
+	}
+	if len(resolvedAST.Blocks) == 0 {
+		fatal("program is empty")
+	}
+
+	// Branch on the backend the source chose — the only place the two
+	// paths diverge.
+	switch backend := resolvedAST.Blocks[0].Backend; backend {
+	case ast.BackendMemory:
+		if *dryRun {
+			fatal("--dry-run applies to the temporal backend; a memory program has no Plan")
 		}
-	}
+		out, err := scriptmem.RunMemory(ctx, memoryConfig(*verbose), resolvedAST)
+		if err != nil {
+			fatal("%v", err)
+		}
+		fmt.Println(out)
 
-	// A key is only required when the selected backend needs one.
-	// claude-code (the default) uses the local `claude` CLI — no key.
-	if *llmBackend == "gemini" && geminiKey == "" {
-		fmt.Fprintln(os.Stderr, "Error: GEMINI_API_KEY required for -llm=gemini")
-		os.Exit(1)
-	}
+	case ast.BackendTemporal:
+		plan, err := script.Compile(ctx, grammar.Registry, src)
+		if err != nil {
+			fatal("compile: %v", err)
+		}
+		if *dryRun {
+			printPlan(plan)
+			return
+		}
+		submit(ctx, plan, *hostPort, *taskQueue)
 
-	// Create runtime
-	rt, err := agentscript.NewRuntime(ctx, agentscript.RuntimeConfig{
-		GeminiAPIKey:       geminiKey,
+	default:
+		fatal("unknown backend %v", backend)
+	}
+}
+
+// readSource takes the program from -e, from a file argument, or from
+// stdin when neither is given and stdin is not a terminal.
+func readSource(expr string, args []string) (script.Source, error) {
+	switch {
+	case expr != "" && len(args) > 0:
+		return "", fmt.Errorf("give either -e or a file, not both")
+	case expr != "":
+		return script.Source(expr), nil
+	case len(args) == 1:
+		b, err := os.ReadFile(args[0])
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", args[0], err)
+		}
+		return script.Source(b), nil
+	case len(args) > 1:
+		return "", fmt.Errorf("expected at most one file, got %d", len(args))
+	}
+	info, err := os.Stdin.Stat()
+	if err == nil && info.Mode()&os.ModeCharDevice == 0 {
+		b, err := os.ReadFile("/dev/stdin")
+		if err != nil {
+			return "", fmt.Errorf("read stdin: %w", err)
+		}
+		return script.Source(b), nil
+	}
+	flag.Usage()
+	os.Exit(2)
+	return "", nil
+}
+
+// memoryConfig reads the interpreter's credentials from the environment.
+// Every field is optional; a verb that needs a credential the config
+// does not supply fails when it runs, as it always has.
+func memoryConfig(verbose bool) scriptmem.MemoryConfig {
+	return scriptmem.MemoryConfig{
+		GeminiAPIKey:       os.Getenv("GEMINI_API_KEY"),
 		ClaudeAPIKey:       coalesce(os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("CLAUDE_API_KEY")),
 		SearchAPIKey:       coalesce(os.Getenv("SEARCH_API_KEY"), os.Getenv("SERPAPI_KEY")),
-		LLMBackend:         *llmBackend,
-		GoogleCredsFile:    googleCreds,
+		LLMBackend:         orDefault(os.Getenv("AGENTSCRIPT_LLM"), "claude-code"),
+		GoogleCredsFile:    googleCreds(),
 		GoogleTokenFile:    os.Getenv("GOOGLE_TOKEN_FILE"),
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
 		GitHubTokenFile:    os.Getenv("GITHUB_TOKEN_FILE"),
-		Verbose:            *verbose,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating runtime: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Create translator for natural language mode
-	var trans *agentscript.Translator
-	if *natural || *interactive {
-		trans, err = agentscript.NewTranslator(ctx, geminiKey)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating translator: %v\n", err)
-			os.Exit(1)
-		}
-	}
-
-	// Execute based on mode
-	switch {
-	case *script != "":
-		executeScript(ctx, rt, *script)
-	case *file != "":
-		executeFile(ctx, rt, *file)
-	case *interactive:
-		runREPL(ctx, rt, trans, *natural)
-	default:
-		// Check for piped input or remaining args
-		if flag.NArg() > 0 {
-			input := strings.Join(flag.Args(), " ")
-			if *natural {
-				executeNatural(ctx, rt, trans, input)
-			} else {
-				executeScript(ctx, rt, input)
-			}
-		} else {
-			printUsage()
-		}
+		Verbose:            verbose,
 	}
 }
 
-func executeScript(ctx context.Context, rt *agentscript.Runtime, script string) {
-	result, err := rt.RunDSL(ctx, script)
-	if err != nil {
-		// Check if it is a parse error vs execution error
-		if strings.Contains(err.Error(), "DSL parse error") {
-			fmt.Fprintf(os.Stderr, "Parse error: %v\n", err)
-		} else {
-			fmt.Fprintf(os.Stderr, "Execution error: %v\n", err)
-		}
-		os.Exit(1)
+func googleCreds() string {
+	if v := os.Getenv("GOOGLE_CREDENTIALS_FILE"); v != "" {
+		return v
 	}
-
-	fmt.Println(result)
+	if _, err := os.Stat("credentials.json"); err == nil {
+		return "credentials.json"
+	}
+	return ""
 }
 
-func executeFile(ctx context.Context, rt *agentscript.Runtime, path string) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading file: %v\n", err)
-		os.Exit(1)
+func submit(ctx context.Context, plan sibyl.Plan, hostPort, taskQueue string) {
+	opts := client.Options{}
+	if hostPort != "" {
+		opts.HostPort = hostPort
 	}
-
-	content := string(data)
-
-	executeScript(ctx, rt, content)
-}
-
-func executeNatural(ctx context.Context, rt *agentscript.Runtime, trans *agentscript.Translator, input string) {
-	dsl, err := trans.Translate(ctx, input)
+	c, err := client.Dial(opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Translation error: %v\n", err)
-		os.Exit(1)
+		fatal("dial Temporal: %v (is the cluster running? try --dry-run to just compile)", err)
 	}
+	defer c.Close()
 
-	fmt.Printf("📝 DSL: %s\n\n", dsl)
-	executeScript(ctx, rt, dsl)
-}
+	handle, err := script.Submit(ctx, c, plan, "", taskQueue)
+	if err != nil {
+		fatal("submit: %v", err)
+	}
+	fmt.Printf("submitted: workflow=%s run=%s\n", handle.GetID(), handle.GetRunID())
+	fmt.Println("waiting for result...")
 
-func runREPL(ctx context.Context, rt *agentscript.Runtime, trans *agentscript.Translator, naturalMode bool) {
-	fmt.Println("🤖 AgentScript REPL")
-	fmt.Println("Commands: :help, :mode, :quit")
+	var res sibyl.PlanResult
+	if err := handle.Get(ctx, &res); err != nil {
+		fatal("workflow failed: %v", err)
+	}
 	fmt.Println()
-
-	scanner := bufio.NewScanner(os.Stdin)
-	for {
-		if naturalMode {
-			fmt.Print("🗣️  > ")
-		} else {
-			fmt.Print("📜 > ")
-		}
-
-		if !scanner.Scan() {
-			break
-		}
-
-		input := strings.TrimSpace(scanner.Text())
-		if input == "" {
-			continue
-		}
-
-		// Handle REPL commands
-		switch input {
-		case ":quit", ":q":
-			fmt.Println("Goodbye!")
-			return
-		case ":help", ":h":
-			printHelp()
-			continue
-		case ":mode", ":m":
-			naturalMode = !naturalMode
-			if naturalMode {
-				fmt.Println("Switched to natural language mode 🗣️")
-			} else {
-				fmt.Println("Switched to DSL mode 📜")
-			}
-			continue
-		}
-
-		// Execute input
-		if naturalMode {
-			dsl, err := trans.Translate(ctx, input)
-			if err != nil {
-				fmt.Printf("❌ Translation error: %v\n", err)
-				continue
-			}
-			fmt.Printf("📝 DSL: %s\n", dsl)
-			input = dsl
-		}
-
-		program, err := agentscript.Parse(input)
-		if err != nil {
-			fmt.Printf("❌ Parse error: %v\n", err)
-			continue
-		}
-
-		result, err := rt.Execute(ctx, program)
-		if err != nil {
-			fmt.Printf("❌ Execution error: %v\n", err)
-			continue
-		}
-
-		fmt.Printf("\n%s\n\n", result)
+	fmt.Println("=== result ===")
+	for _, leaf := range res.Leaves {
+		fmt.Printf("%s: %s\n", leaf, res.Outputs[leaf])
 	}
+	fmt.Printf("(%d nodes, %dms)\n", len(res.Outputs), res.DurationMs)
 }
 
-func printUsage() {
-	fmt.Print(`AgentScript - A DSL for commanding AI agents
+func printPlan(plan sibyl.Plan) {
+	b, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		fatal("marshal plan: %v", err)
+	}
+	fmt.Println(string(b))
+}
 
-Usage:
-  agentscript [flags] [script]
-  agentscript -i              # Interactive REPL
-  agentscript -n "natural language command"
-  agentscript -e 'search "topic" >=> summarize'
-  agentscript -f script.as
+func usage() {
+	fmt.Fprint(os.Stderr, `usage:
+  agentscript [flags] <file>
+  agentscript [flags] -e '<program>'
+  cat prog.as | agentscript [flags]
 
-Flags:
-  -i    Interactive REPL mode
-  -n    Natural language mode (translates to DSL)
-  -e    Execute DSL script directly
-  -f    Execute DSL script from file
-  -v    Verbose output
+flags:
+  -e <program>     execute the given program text
+  -v               verbose output
+  --dry-run        compile and print the Plan as JSON (temporal backend only)
+  --temporal host:port
+  --queue <name>
 
-Environment:
-  GEMINI_API_KEY   Required. Your Gemini API key
-  SEARCH_API_KEY   Optional. API key for web search (SerpAPI, etc.)
-
-DSL Commands:
-  SEARCH "query"     Search the web
-  SUMMARIZE          Summarize input content
-  SAVE "file"        Save to file
-  READ "file"        Read from file
-  ASK "question"     Ask a question with context
-  ANALYZE "focus"    Analyze content
-  LIST "path"        List directory contents
-  MERGE              Combine parallel results
-  EMAIL "address"    Send email with content
-
-Fan-out (parallel execution):
-  ( search "topic A" >=> analyze
-    <*> search "topic B" >=> analyze
-  ) >=> merge >=> ask "compare these"
-
-Sequential pipeline with >=>>:
-  search "golang tutorials" >=> summarize >=> save "notes.md"
-
-Examples:
-  agentscript -e 'read "doc.txt" >=> summarize'
-  agentscript -e '( search "Google" >=> analyze "strengths" <*> search "Microsoft" >=> analyze "strengths" ) >=> merge >=> ask "who is winning?"'
-  agentscript -n "compare Apple and Samsung and email the results to me"
-  agentscript -i
+examples:
+  agentscript -e '(pipe (search "go releases") summarize)'
+  agentscript examples/tech-digest.as
+  agentscript --dry-run examples/durable-echo.as
 `)
 }
 
-func printHelp() {
-	fmt.Print(`
-REPL Commands:
-  :help, :h   Show this help
-  :mode, :m   Toggle natural language / DSL mode  
-  :quit, :q   Exit REPL
-
-DSL Syntax:
-  SEARCH "query"     - Search the web
-  SUMMARIZE          - Summarize piped content
-  SAVE "filename"    - Save to file
-  READ "filename"    - Read from file
-  ASK "question"     - Ask with context
-  ANALYZE "focus"    - Analyze content
-  LIST "path"        - List directory
-  MERGE              - Combine parallel results
-  EMAIL "address"    - Send email
-
-Fan-out (parallel):
-  ( search "A" >=> analyze
-    <*> search "B" >=> analyze
-  ) >=> merge >=> ask "compare"
-
-Sequential pipeline:
-  search "topic" >=> summarize >=> save "out.md"
-`)
-}
-
-// coalesce returns the first non-empty string.
 func coalesce(vals ...string) string {
 	for _, v := range vals {
 		if v != "" {
@@ -280,4 +218,16 @@ func coalesce(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "agentscript: "+format+"\n", args...)
+	os.Exit(1)
 }

@@ -63,8 +63,8 @@ func Grammar() GrammarInfo {
 		Registry: reg,
 		Verbs:    reg.Names(),
 		Operators: []OperatorInfo{
-			{Symbol: ">=>", Name: "pipe", Desc: "sequential composition: left output feeds the right"},
-			{Symbol: "<*>", Name: "fanout", Desc: "parallel fanout: branches run on the same input"},
+			{Symbol: "pipe", Name: "pipe", Desc: "sequential composition: each stage's output feeds the next"},
+			{Symbol: "par", Name: "fanout", Desc: "parallel fanout: branches run on the same input"},
 		},
 		Backends: []string{"memory", "temporal"},
 	}

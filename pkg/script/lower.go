@@ -51,7 +51,7 @@ type Lowered struct {
 }
 
 // Lower converts a resolved AST into a Lowered fragment. The MVP handles
-// a single block containing a Pipeline of Calls (temporal static), which
+// a single block containing a Pipeline of Calls (:backend temporal), which
 // is what the parser currently produces. Multiple blocks and Parallel
 // are rejected with a clear error until their phases are added.
 func Lower(_ context.Context, in resolved.AST) (Lowered, error) {

@@ -3,7 +3,6 @@ module github.com/vinodhalaharvi/agentscript
 go 1.24.0
 
 require (
-	github.com/alecthomas/participle/v2 v2.1.1
 	github.com/lib/pq v1.12.3
 	github.com/vinodhalaharvi/sibyl v0.1.1-0.20260521024214-bfa4bcb5ee5f
 	github.com/vinodhalaharvi/weft v0.1.0

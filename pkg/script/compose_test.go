@@ -22,7 +22,10 @@ func TestCompileArrow_IsAComposableArrow(t *testing.T) {
 	// arrow type is a compile-time proof of its shape.
 	var compile weft.Arrow[script.Source, sibyl.Plan] = script.CompileArrow(reg)
 
-	plan, err := compile(context.Background(), `temporal static ( echo "hi" >=> echo )`)
+	plan, err := compile(context.Background(), `(block :backend temporal :mode static
+	  (pipe
+	    (echo "hi")
+	    echo))`)
 	if err != nil {
 		t.Fatalf("compile arrow: %v", err)
 	}
@@ -43,7 +46,11 @@ func TestCompileArrow_ComposesIntoLargerArrow(t *testing.T) {
 
 	sourceToCount := weft.Pipe2(script.CompileArrow(reg), countNodes)
 
-	n, err := sourceToCount(context.Background(), `temporal static ( echo "a" >=> echo "b" >=> echo "c" )`)
+	n, err := sourceToCount(context.Background(), `(block :backend temporal :mode static
+	  (pipe
+	    (echo "a")
+	    (echo "b")
+	    (echo "c")))`)
 	if err != nil {
 		t.Fatalf("composed arrow: %v", err)
 	}
@@ -59,7 +66,8 @@ func TestCompileArrow_ErrorShortCircuits(t *testing.T) {
 	// Unknown builtin: the error must propagate out of the composition
 	// (Compose short-circuits on the first failing arrow), not panic or
 	// produce a partial plan.
-	_, err := compile(context.Background(), `temporal static ( teleport "mars" )`)
+	_, err := compile(context.Background(), `(block :backend temporal :mode static
+	  (teleport "mars"))`)
 	if err == nil {
 		t.Fatal("expected composition to short-circuit with an error")
 	}

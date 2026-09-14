@@ -23,12 +23,11 @@ jobs:
           git diff --exit-code go.mod go.sum
 
       - name: Vet
-        # -structtag=false suppresses go vet warnings about participle
         # grammar struct tags. Participle reads its struct tags itself
         # rather than via reflect.StructTag.Get, so vet's complaint that
         # the tags aren't reflect-compatible is structurally unavoidable.
         # Every other vet check stays enabled.
-        run: go vet -structtag=false ./...
+        run: go vet ./...
 
       - name: gofmt
         run: |

@@ -36,7 +36,7 @@ type CompleteFunc func(ctx context.Context, systemPrompt, userMessage string) (s
 // the LLM's output with code fences and stray prose stripped.
 //
 // The composition discipline is encoded in the prompt: emit sequential
-// pipelines (>=>) by default, and parallel fan-out (<*>) only for an
+// pipelines (pipe) by default, and parallel fan-out (par) only for an
 // unambiguous flat list of independent actions. Inferring parallelism a
 // user did not clearly express is the risky case, so the prompt biases
 // toward sequential. The grammar is permissive; the translation is
@@ -69,12 +69,20 @@ func BuildPrompt(reg *registry.Registry) string {
 	return `You translate a user's request into a small pipeline language called AgentScript. Output ONLY the AgentScript program — no prose, no explanation, no code fences.
 
 GRAMMAR
-A program is a single block that names an execution backend:
-  memory static ( <pipeline> )      ← runs in-process, immediately
-  temporal static ( <pipeline> )    ← runs as a durable workflow
-A pipeline is one or more commands joined by >=> (sequential, left output feeds right):
-  command "arg" >=> command "arg" >=> command
-Parallel fan-out exists as <*> inside parentheses, but use it ONLY when the request is an explicit, unambiguous flat list of independent things to do at once. When in doubt, use sequential >=> .
+AgentScript is written as s-expressions. A program is a single block that names an execution backend:
+  (block :backend memory :mode static BODY)      ← runs in-process, immediately
+  (block :backend temporal :mode static BODY)    ← runs as a durable workflow
+
+BODY is one of:
+  (pipe STAGE STAGE ...)   sequential — each stage's output feeds the next
+  (par BRANCH BRANCH ...)  parallel fan-out — branches run on the same input
+  a single stage
+
+A stage is a command call. With arguments it is a list; with none it is a bare name:
+  (search "golang jobs")
+  summarize
+
+Use ` + "`par`" + ` ONLY when the request is an explicit, unambiguous flat list of independent things to do at once, and follow it with ` + "`merge`" + `. When in doubt, use ` + "`pipe`" + `.
 
 CHOOSING THE BACKEND
 - Use ` + "`memory`" + ` by DEFAULT — for research, summarizing, reading files, asking questions, analysis, and almost everything. It runs the full command set immediately.
@@ -82,70 +90,31 @@ CHOOSING THE BACKEND
 - If the user says "in memory", "locally", "quickly", or doesn't mention durability, use ` + "`memory`" + `.
 
 PASSING CONTENT
-When the user pastes text to act on (e.g. "summarize <pasted text>", "analyze <pasted text>"), put that pasted text directly into the command's quoted argument:
+When the user pastes text to act on (e.g. "summarize <pasted text>"), put that pasted text directly into the command's quoted argument:
   Request: summarize The quick brown fox jumped over the lazy dog.
-  Output: memory static ( summarize "The quick brown fox jumped over the lazy dog." )
+  Output: (block :backend memory :mode static (summarize "The quick brown fox jumped over the lazy dog."))
 Do NOT use a file path or ` + "`read`" + ` for pasted content — content travels in the argument so the same program is portable across backends. Verbs take their content from the pipeline input or, when there is none, from their argument.
 
 AVAILABLE COMMANDS (you may use ONLY these — never invent a command):
   ` + available + `
 
 RULES
-1. Output exactly one block: ` + "`memory static ( ... )`" + ` or ` + "`temporal static ( ... )`" + `. Nothing else.
+1. Output exactly one block: ` + "`(block :backend memory :mode static ...)`" + ` or ` + "`(block :backend temporal :mode static ...)`" + `. Nothing else.
 2. Default to the memory backend unless durability is explicitly requested.
 3. Use only commands from the AVAILABLE COMMANDS list. If the request needs a command that does not exist, choose the closest available command; do not invent names.
-4. Prefer sequential >=> . Use <*> only for a clear list of independent parallel actions.
+4. Prefer ` + "`pipe`" + `. Use ` + "`par`" + ` only for a clear list of independent parallel actions.
 5. String arguments are double-quoted. Pass the user's intent as the argument text.
-6. Keep it minimal — the smallest pipeline that satisfies the request.
+6. Parentheses must balance. A command with no arguments is written as a bare name, not as an empty list.
+7. Keep it minimal — the smallest pipeline that satisfies the request.
 
 EXAMPLES
 Request: summarize this article about climate policy
-Output: memory static ( summarize "this article about climate policy" )
+Output: (block :backend memory :mode static (summarize "this article about climate policy"))
 
 Request: research Google and Microsoft strengths, then tell me who is winning
-Output: memory static ( ( search "Google strengths" >=> analyze "strengths" <*> search "Microsoft strengths" >=> analyze "strengths" ) >=> merge >=> ask "who is winning?" )
+Output: (block :backend memory :mode static (pipe (par (pipe (search "Google strengths") (analyze "strengths")) (pipe (search "Microsoft strengths") (analyze "strengths"))) merge (ask "who is winning?")))
 
 Request: say hello to the team
-Output: memory static ( echo "hello to the team" )
-
-Request: run a durable workflow that echoes hello
-Output: temporal static ( echo "hello" )`
-}
-
-// cleanDSL strips common LLM wrapping (code fences, leading/trailing
-// prose) so the result is just the AgentScript program. It is
-// deliberately conservative: it removes fences and trims, but does not
-// try to "fix" the DSL — malformed output should fail loudly at Compile,
-// not be silently patched here.
-func cleanDSL(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		if nl := strings.IndexByte(s, '\n'); nl != -1 {
-			s = s[nl+1:]
-		}
-		s = strings.TrimSuffix(strings.TrimSpace(s), "```")
-	}
-	s = strings.TrimSpace(s)
-	if i := indexOfBlockStart(s); i > 0 {
-		s = s[i:]
-	}
-	if j := strings.LastIndexByte(s, ')'); j != -1 && j < len(s)-1 {
-		s = s[:j+1]
-	}
-	return strings.TrimSpace(s)
-}
-
-func indexOfBlockStart(s string) int {
-	t := strings.Index(s, "temporal")
-	m := strings.Index(s, "memory")
-	switch {
-	case t == -1:
-		return m
-	case m == -1:
-		return t
-	case t < m:
-		return t
-	default:
-		return m
-	}
+Output: (block :backend memory :mode static (echo "hello to the team"))
+`
 }
