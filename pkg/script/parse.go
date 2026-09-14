@@ -26,6 +26,7 @@ import (
 	"github.com/alecthomas/participle/v2/lexer"
 
 	"github.com/vinodhalaharvi/agentscript/pkg/script/ast"
+	"github.com/vinodhalaharvi/agentscript/pkg/script/sexpr"
 )
 
 // === Parse arrow ===========================================================
@@ -37,6 +38,17 @@ import (
 // They are returned as ParseError values; callers can errors.As to
 // recover the underlying participle error for richer reporting.
 func Parse(ctx context.Context, src Source) (ast.AST, error) {
+	// Two surface dialects, one AST. The s-expression dialect is the
+	// direction of travel; the operator dialect stays until the corpus
+	// is converted and internal/agentscript is removed.
+	//
+	// No flag, extension, or pragma is needed to tell them apart: a
+	// legacy block opens with the backend keyword (an identifier), an
+	// s-expression script opens with '('. When the operator dialect is
+	// deleted, this dispatch collapses to a direct call.
+	if sexpr.Detect(string(src)) {
+		return ParseSExpr(ctx, src)
+	}
 	parsed, err := scriptParser.ParseString("", string(src))
 	if err != nil {
 		return ast.AST{}, ParseError{Err: err, Source: string(src)}
