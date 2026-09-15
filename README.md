@@ -10,7 +10,7 @@ One line replaces hundreds of lines of code.
 
 ## What It Does
 
-AgentScript lets you chain Gemini AI with 100+ commands using Morpheus category-theory operators. Research topics, generate images and videos, send emails, check stocks, monitor Reddit, read RSS feeds, get weather forecasts, search jobs, run MCP tools, query knowledge graphs — all in one script.
+AgentScript lets you chain AI models with 100+ commands using two s-expression forms: `(pipe ...)` runs stages in sequence, `(par ...)` runs them at once. Research topics, generate images and videos, send emails, check stocks, monitor Reddit, read RSS feeds, get weather forecasts, search jobs, run MCP tools, query knowledge graphs — all in one script.
 
 ```bash
 # Morning briefing in one command
@@ -244,10 +244,10 @@ AgentScript ships 100+ commands. The most common are grouped below; the authorit
 ```
 
 ### Natural Language Mode
-```bash
-./agentscript -n "find golang jobs and email me a summary"
-# Gemini translates English -> DSL -> executes
-```
+
+Prose-to-program translation lives in `pkg/script` (`Translate`, `BuildPrompt`)
+and its prompt teaches the s-expression syntax, but it is not currently wired
+to a CLI flag — the old `-n` mode went with the legacy binary.
 
 ## RSS Feed Shortcuts
 
@@ -270,10 +270,10 @@ No URL needed — just use the shortcut name:
 ## Architecture
 
 ```
-Natural Language ─── Gemini/Claude translates ──→ AgentScript DSL
+Natural Language ─── Gemini/Claude translates ──→ AgentScript source
                                                       │
-                                                 Participle parser
-                                                 (Morpheus grammar)
+                                                 s-expression reader
+                                                 (pkg/script/sexpr)
                                                       │
                                                      AST
                                                       │
@@ -365,17 +365,17 @@ export TWILIO_WHATSAPP_FROM="whatsapp:+14155238886"
 # Expression mode
 ./agentscript -e '(pipe (search "topic") summarize)'
 
-# File mode
-./agentscript -f examples/daily-briefing.as
+# File mode — the file is a positional argument, there is no -f
+./agentscript examples/tech-digest.as
 
-# REPL mode
-./agentscript -i
+# Stdin
+cat examples/research.as | ./agentscript
 
-# Natural language mode
-./agentscript -n "research AI and email me a summary"
+# Compile a temporal program and print its Plan, no cluster needed
+./agentscript --dry-run examples/durable-echo.as
 
 # Verbose mode (debug)
-./agentscript -v -e 'crypto "BTC"'
+./agentscript -v -e '(crypto "BTC")'
 ```
 
 ## Testing
